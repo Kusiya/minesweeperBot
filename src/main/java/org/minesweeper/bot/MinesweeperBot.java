@@ -7,6 +7,7 @@ import org.minesweeper.strategy.BasicStrategy;
 import org.minesweeper.strategy.AdvancedStrategy;
 import org.minesweeper.vision.ScreenCapture;
 import org.minesweeper.vision.CellRecognizer;
+import org.minesweeper.vision.TemplateCellRecognizer;
 import org.minesweeper.vision.TemplateLoader;
 import org.minesweeper.execution.MouseController;
 import org.minesweeper.utils.Logger;
@@ -37,6 +38,11 @@ public class MinesweeperBot {
     private int cols;
     private int totalMines;
 
+    // Калибровочные данные - ДОБАВИТЬ ЭТИ ПОЛЯ
+    private int offsetX;
+    private int offsetY;
+    private int cellSize;
+
     public MinesweeperBot() throws AWTException {
         this.running = false;
         this.delayBetweenMoves = 200;
@@ -47,13 +53,8 @@ public class MinesweeperBot {
 
         // Загрузка шаблонов для распознавания
         TemplateLoader templateLoader = new TemplateLoader();
-        try {
-            templateLoader.loadAllTemplates();
-        } catch (Exception e) {
-            Logger.warn("Не удалось загрузить шаблоны: " + e.getMessage());
-        }
-
-        this.cellRecognizer = new CellRecognizer(templateLoader);
+        templateLoader.loadAllTemplates();
+        this.cellRecognizer = new TemplateCellRecognizer(templateLoader);
 
         // По умолчанию используем продвинутую стратегию
         this.strategy = new AdvancedStrategy();
@@ -62,6 +63,11 @@ public class MinesweeperBot {
         this.rows = 9;
         this.cols = 9;
         this.totalMines = 10;
+
+        // Калибровочные данные по умолчанию
+        this.offsetX = 100;
+        this.offsetY = 100;
+        this.cellSize = 30;
     }
 
     /**
@@ -73,6 +79,7 @@ public class MinesweeperBot {
 
         Logger.info("Бот запущен. Стратегия: " + strategy.getName());
         Logger.info("Параметры игры: " + rows + "x" + cols + ", мин: " + totalMines);
+        Logger.info("Калибровка: offset=(" + offsetX + "," + offsetY + "), cellSize=" + cellSize);
 
         try {
             gameLoop();
@@ -86,12 +93,18 @@ public class MinesweeperBot {
      * Основной игровой цикл
      */
     private void gameLoop() throws Exception {
+        // Даем время переключиться на игру
+        Logger.info("Переключитесь на окно с игрой...");
+        Thread.sleep(3000);
+
         while (running) {
             // 1. Захват экрана
             BufferedImage screenshot = screenCapture.captureGameArea();
 
-            // 2. Распознавание поля
-            int[][] visionData = cellRecognizer.recognizeBoard(screenshot, rows, cols);
+            // 2. Распознавание поля - ИСПРАВЛЕНО: добавили параметры калибровки
+            int[][] visionData = cellRecognizer.recognizeBoard(
+                    screenshot, rows, cols, offsetX, offsetY, cellSize
+            );
 
             // 3. Обновление состояния
             GameState state = new GameState(rows, cols);
@@ -100,13 +113,13 @@ public class MinesweeperBot {
 
             // 4. Проверка окончания игры
             if (state.isGameOver()) {
-                Logger.info("Игра проиграна!");
+                Logger.info("💥 Игра проиграна!");
                 gamesLost++;
                 break;
             }
 
             if (state.checkWinCondition()) {
-                Logger.info("Победа!");
+                Logger.info("🏆 Победа!");
                 gamesWon++;
                 break;
             }
@@ -116,11 +129,12 @@ public class MinesweeperBot {
             Move move = strategy.nextMove(state);
 
             if (move == null) {
-                Logger.warn("Нет доступных ходов. Завершение.");
+                Logger.warn("❌ Нет доступных ходов. Завершение.");
+                gamesLost++;
                 break;
             }
 
-            Logger.info("Выбран ход: " + move);
+            Logger.info("➡ Выбран ход: " + move);
 
             // 6. Выполнение хода
             mouseController.executeMove(move);
@@ -141,15 +155,22 @@ public class MinesweeperBot {
     }
 
     // Настройки
-    public void setDelay(int ms) { this.delayBetweenMoves = ms; }
-    public int getDelay() { return delayBetweenMoves; }
+    public void setDelay(int ms) {
+        this.delayBetweenMoves = ms;
+    }
+
+    public int getDelay() {
+        return delayBetweenMoves;
+    }
 
     public void setStrategy(Strategy strategy) {
         this.strategy = strategy;
         Logger.info("Стратегия изменена на: " + strategy.getName());
     }
 
-    public String getStrategyName() { return strategy.getName(); }
+    public String getStrategyName() {
+        return strategy.getName();
+    }
 
     public void setGameParameters(int rows, int cols, int mines) {
         this.rows = rows;
@@ -157,13 +178,18 @@ public class MinesweeperBot {
         this.totalMines = mines;
     }
 
-    // Калибровка
+    // Калибровка - ИСПРАВЛЕНО: сохраняем значения в поля класса
     public void calibrate(int offsetX, int offsetY, int cellSize) {
+        this.offsetX = offsetX;
+        this.offsetY = offsetY;
+        this.cellSize = cellSize;
+
         mouseController.setOffset(offsetX, offsetY);
         mouseController.setCellSize(cellSize);
         screenCapture.setOffsetX(offsetX);
         screenCapture.setOffsetY(offsetY);
         screenCapture.setCellSize(cellSize);
+
         Logger.info("Калибровка завершена: offset=(" + offsetX + "," + offsetY + "), size=" + cellSize);
     }
 
@@ -176,4 +202,9 @@ public class MinesweeperBot {
         if (gamesPlayed == 0) return 0;
         return (double) gamesWon / gamesPlayed;
     }
+
+    // Геттеры для калибровки
+    public int getOffsetX() { return offsetX; }
+    public int getOffsetY() { return offsetY; }
+    public int getCellSize() { return cellSize; }
 }
