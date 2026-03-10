@@ -1,7 +1,6 @@
 package org.minesweeper.ui;
 
 import org.minesweeper.bot.MinesweeperBot;
-import org.minesweeper.utils.Logger;
 import java.util.Scanner;
 
 /**
@@ -79,7 +78,7 @@ public class BotConsole {
             try {
                 bot.start();
             } catch (Exception e) {
-                Logger.error("Ошибка при запуске бота: " + e.getMessage());
+                System.err.println("Ошибка при запуске бота: " + e.getMessage());
             }
         }).start();
     }
@@ -94,12 +93,7 @@ public class BotConsole {
         System.out.println("1. Наведите мышь на левый верхний угол поля и нажмите Enter");
         scanner.nextLine();
 
-        // Получить координаты мыши
-        // Здесь нужно добавить получение координат
-
-        System.out.println("2. Введите размер клетки в пикселях (обычно 30-40):");
-        int size = Integer.parseInt(scanner.nextLine());
-
+        // Здесь нужно получить координаты мыши
         System.out.println("Калибровка завершена!");
     }
 
@@ -116,8 +110,6 @@ public class BotConsole {
         System.out.println("\n=== Настройки ===");
         System.out.println("Скорость (мс между ходами): " + bot.getDelay());
         System.out.println("Стратегия: " + bot.getStrategyName());
-        System.out.println("Использовать паттерны: Да");
-        System.out.println("Вероятностный анализ: Да");
     }
 
     private void exit() {
