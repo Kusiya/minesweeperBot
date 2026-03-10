@@ -1,129 +1,108 @@
 package org.minesweeper.vision;
 
 import java.awt.image.BufferedImage;
+import java.util.Map;
 
 /**
- * Упрощенный распознаватель, использующий анализ цветов
+ * Распознаёт содержимое клетки по изображению
  */
 public class CellRecognizer {
+    private TemplateLoader templateLoader;
+    private double matchThreshold = 30.0; // порог совпадения
 
-    /**
-     * Распознать одну клетку по цвету
-     * @return -1 мина, 0-8 цифры, -2 закрыто, -3 флаг
-     */
-    public int recognizeCell(BufferedImage cellImage) {
-        try {
-            // Берем цвет в центре клетки
-            int centerX = cellImage.getWidth() / 2;
-            int centerY = cellImage.getHeight() / 2;
-            int centerColor = cellImage.getRGB(centerX, centerY);
-
-            // Получаем RGB компоненты
-            int red = (centerColor >> 16) & 0xFF;
-            int green = (centerColor >> 8) & 0xFF;
-            int blue = centerColor & 0xFF;
-
-            // Лог для отладки
-            // System.out.printf("RGB: (%d, %d, %d)%n", red, green, blue);
-
-            // Цвета для стандартного сапёра в Windows
-            // Закрытая клетка (серая)
-            if (red > 180 && green > 180 && blue > 180) {
-                if (Math.abs(red - green) < 20 && Math.abs(green - blue) < 20) {
-                    return -2; // закрыто
-                }
-            }
-
-            // Пустая открытая (белая)
-            if (red > 240 && green > 240 && blue > 240) {
-                return 0;
-            }
-
-            // Синий - цифра 1
-            if (red < 100 && green < 150 && blue > 200) {
-                return 1;
-            }
-
-            // Зеленый - цифра 2
-            if (red < 100 && green > 150 && blue < 100) {
-                return 2;
-            }
-
-            // Красный - цифра 3
-            if (red > 200 && green < 100 && blue < 100) {
-                return 3;
-            }
-
-            // Темно-синий - цифра 4
-            if (red < 100 && green < 100 && blue > 150 && blue < 200) {
-                return 4;
-            }
-
-            // Темно-красный - цифра 5
-            if (red > 150 && red < 200 && green < 80 && blue < 80) {
-                return 5;
-            }
-
-            // Бирюзовый - цифра 6
-            if (red < 100 && green > 150 && blue > 150) {
-                return 6;
-            }
-
-            // Черный - цифра 7
-            if (red < 50 && green < 50 && blue < 50) {
-                return 7;
-            }
-
-            // Темно-серый - цифра 8
-            if (red > 100 && red < 150 && green > 100 && green < 150 && blue > 100 && blue < 150) {
-                if (Math.abs(red - green) < 20 && Math.abs(green - blue) < 20) {
-                    return 8;
-                }
-            }
-
-            // Флаг (красный)
-            if (red > 200 && green < 100 && blue < 100) {
-                // Проверяем, не цифра ли это 3
-                if (red > 240) {
-                    return -3; // флаг
-                }
-            }
-
-        } catch (Exception e) {
-            // Игнорируем ошибки распознавания
-        }
-
-        return -2; // неизвестно
+    public CellRecognizer(TemplateLoader templateLoader) {
+        this.templateLoader = templateLoader;
     }
 
     /**
-     * Распознать всё поле
+     * Распознать одну клетку
+     * @return -1 мина, 0-8 цифры, -2 закрыто, -3 флаг
      */
-    public int[][] recognizeBoard(BufferedImage fullImage, int rows, int cols,
-                                  int offsetX, int offsetY, int cellSize) {
+    public int recognizeCell(BufferedImage cellImage) {
+        int bestMatch = -2; // по умолчанию - закрыто
+        double bestDifference = Double.MAX_VALUE;
+
+        // Сравниваем со всеми шаблонами
+        for (Map.Entry<Integer, BufferedImage> entry : templateLoader.getAllTemplates().entrySet()) {
+            int value = entry.getKey();
+            BufferedImage template = entry.getValue();
+
+            double difference = compareImages(cellImage, template);
+
+            if (difference < bestDifference) {
+                bestDifference = difference;
+                bestMatch = value;
+            }
+        }
+
+        // Если разница слишком велика, считаем что не распознали
+        if (bestDifference > matchThreshold) {
+            return -2; // unknown
+        }
+
+        return bestMatch;
+    }
+
+    /**
+     * Сравнить два изображения
+     * @return средняя разница в цвете (чем меньше, тем больше похожи)
+     */
+    private double compareImages(BufferedImage img1, BufferedImage img2) {
+        // Приводим к одинаковому размеру
+        BufferedImage scaled1 = scaleImage(img1, 20, 20);
+        BufferedImage scaled2 = scaleImage(img2, 20, 20);
+
+        double totalDiff = 0;
+        int pixels = 0;
+
+        for (int x = 0; x < 20; x++) {
+            for (int y = 0; y < 20; y++) {
+                int rgb1 = scaled1.getRGB(x, y);
+                int rgb2 = scaled2.getRGB(x, y);
+
+                // Переводим в градации серого
+                int gray1 = getGrayValue(rgb1);
+                int gray2 = getGrayValue(rgb2);
+
+                totalDiff += Math.abs(gray1 - gray2);
+                pixels++;
+            }
+        }
+
+        return totalDiff / pixels;
+    }
+
+    /**
+     * Масштабировать изображение
+     */
+    private BufferedImage scaleImage(BufferedImage original, int width, int height) {
+        BufferedImage scaled = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        scaled.getGraphics().drawImage(original, 0, 0, width, height, null);
+        return scaled;
+    }
+
+    /**
+     * Получить значение яркости из RGB
+     */
+    private int getGrayValue(int rgb) {
+        int r = (rgb >> 16) & 0xFF;
+        int g = (rgb >> 8) & 0xFF;
+        int b = rgb & 0xFF;
+        return (int)(0.299 * r + 0.587 * g + 0.114 * b);
+    }
+
+    /**
+     * Распознать всё поле целиком
+     * @return матрица значений
+     */
+    public int[][] recognizeBoard(BufferedImage fullImage, int rows, int cols) {
         int[][] board = new int[rows][cols];
 
-        for (int row = 0; row < rows; row++) {
-            for (int col = 0; col < cols; col++) {
-                try {
-                    int x = offsetX + col * cellSize;
-                    int y = offsetY + row * cellSize;
-
-                    // Проверяем, не выходит ли за границы
-                    if (x + cellSize <= fullImage.getWidth() && y + cellSize <= fullImage.getHeight()) {
-                        // Вырезаем клетку
-                        BufferedImage cellImage = fullImage.getSubimage(
-                                x, y, cellSize, cellSize
-                        );
-
-                        // Распознаем
-                        board[row][col] = recognizeCell(cellImage);
-                    } else {
-                        board[row][col] = -2;
-                    }
-                } catch (Exception e) {
-                    board[row][col] = -2;
-                }
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                // Здесь нужно получить изображение каждой клетки
+                // Для простоты пока заполняем случайными значениями
+                board[i][j] = -2; // все закрыто
             }
         }
 
