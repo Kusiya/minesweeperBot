@@ -7,8 +7,8 @@ import java.util.Properties;
  * Загрузка и сохранение настроек
  */
 public class Config {
-    private Properties properties;
-    private String configFile;
+    private final Properties properties;
+    private final String configFile;
 
     public Config(String configFile) {
         this.configFile = configFile;

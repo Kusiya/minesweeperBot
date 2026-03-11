@@ -8,7 +8,7 @@ import java.awt.event.InputEvent;
  * Управляет мышью для выполнения кликов
  */
 public class MouseController {
-    private Robot robot;
+    private final Robot robot;
     private int offsetX;      // координата левого верхнего угла первой клетки
     private int offsetY;
     private int cellSize;     // размер клетки в пикселях
@@ -87,7 +87,7 @@ public class MouseController {
     /**
      * Получить текущие координаты мыши (для калибровки)
      */
-    public Point getMousePosition() {
+    public static Point getMousePosition() {
         return MouseInfo.getPointerInfo().getLocation();
     }
 }

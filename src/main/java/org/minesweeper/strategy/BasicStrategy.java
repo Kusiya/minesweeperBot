@@ -3,7 +3,6 @@ package org.minesweeper.strategy;
 import org.minesweeper.core.Cell;
 import org.minesweeper.core.GameState;
 import org.minesweeper.core.Move;
-import java.util.List;
 
 /**
  * Базовая стратегия, использующая простые правила
@@ -28,7 +27,6 @@ public class BasicStrategy implements Strategy {
         if (flagMove != null) {
             return flagMove;
         }
-
         return null; // нет очевидных ходов
     }
 

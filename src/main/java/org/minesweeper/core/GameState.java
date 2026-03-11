@@ -1,5 +1,7 @@
 package org.minesweeper.core;
 
+import org.minesweeper.utils.Logger;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -49,15 +51,19 @@ public class GameState {
                     cell.setRevealed(true);
                     cell.setFlagged(false);
                     cell.setAdjacentMines(value);
+                    cell.setMine(false);
                     revealedCount++;
                 } else if (value == -1) {
                     // Открытая мина - игра проиграна
                     cell.setRevealed(true);
                     cell.setMine(true);
-                    gameOver = true;
+                    cell.setFlagged(false);
+                    gameOver = true; // <-- ВАЖНО!
+                    Logger.debug("🔴 Обнаружена мина в клетке (" + i + "," + j + ")");
                 } else if (value == -3) {
                     // Флаг
                     cell.setFlagged(true);
+                    cell.setRevealed(false);
                     flaggedCount++;
                 }
                 // -2 (закрыто) ничего не меняем
