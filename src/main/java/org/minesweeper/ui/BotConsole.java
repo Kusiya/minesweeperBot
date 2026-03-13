@@ -1,511 +1,461 @@
 package org.minesweeper.ui;
 
+import org.minesweeper.bot.AdvancedMinesweeperBot;
 import org.minesweeper.bot.MinesweeperBot;
-import org.minesweeper.execution.MouseController;
+import org.minesweeper.core.Move;
+import org.minesweeper.strategy.*;
+import org.minesweeper.strategy.pattern.*;
+import org.minesweeper.utils.Config;
 import org.minesweeper.utils.Logger;
-import org.minesweeper.strategy.BasicStrategy;
-import org.minesweeper.strategy.AdvancedStrategy;
+import org.minesweeper.utils.BotStatistics;
 
-import java.awt.*;
-import java.awt.event.InputEvent;
-import java.awt.image.BufferedImage;
-import java.io.File;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Scanner;
-import javax.imageio.ImageIO;
-import javax.swing.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.KeyEvent;
-import javax.swing.KeyStroke;
 
+/**
+ * Консольный интерфейс для управления ботом.
+ * Позволяет настраивать параметры и наблюдать за игрой.
+ */
 public class BotConsole {
-    private MinesweeperBot bot;
     private Scanner scanner;
-    private boolean consoleRunning;
-    private javax.swing.Timer emergencyTimer;
-    private JFrame hiddenFrame; // Сохраняем ссылку на скрытое окно
+    private MinesweeperBot bot;
+    private BotStatistics statistics;
+    private Logger logger;
+    private Config config;
+    private boolean running;
 
-    public BotConsole(MinesweeperBot bot) {
-        this.bot = bot;
+    public BotConsole() {
         this.scanner = new Scanner(System.in);
-        this.consoleRunning = true;
-
-        setupEmergencyListener();
-
-        // Добавляем обработчик Ctrl+C
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.out.println("\n📢 Получен сигнал завершения (Ctrl+C)");
-            emergencyStop();
-        }));
+        this.statistics = new BotStatistics();
+        this.logger = Logger.getInstance();
+        this.config = Config.getInstance();
+        this.running = true;
     }
 
-    private void setupEmergencyListener() {
-        // Создаем скрытое окно для прослушивания клавиш
-        hiddenFrame = new JFrame();
-        hiddenFrame.setUndecorated(true);
-        hiddenFrame.setSize(0, 0);
-        hiddenFrame.setLocationRelativeTo(null);
-        hiddenFrame.setVisible(true);
-
-        // Регистрируем горячие клавиши
-        JPanel panel = new JPanel();
-
-        // ESC для экстренной остановки
-        panel.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
-                KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "emergencyStop");
-        panel.getActionMap().put("emergencyStop", new AbstractAction() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                emergencyStop();
-            }
-        });
-
-        // Пробел для паузы
-        panel.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
-                KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0), "togglePause");
-        panel.getActionMap().put("togglePause", new AbstractAction() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                if (bot.isRunning()) {
-                    bot.togglePause();
-                }
-            }
-        });
-
-        hiddenFrame.add(panel);
-        hiddenFrame.requestFocus();
-
-        // Таймер для периодического возврата фокуса
-        emergencyTimer = new javax.swing.Timer(1000, e -> {
-            if (!hiddenFrame.hasFocus() && consoleRunning) {
-                hiddenFrame.requestFocus();
-            }
-        });
-        emergencyTimer.start();
-    }
-
-    // ⚠️ ВАЖНО: Этот метод должен быть на уровне класса, а не внутри setupEmergencyListener!
-    private void emergencyStop() {
-        System.out.println("\n🚨 ЭКСТРЕННАЯ ОСТАНОВКА!");
-
-        // Останавливаем бота
-        bot.emergencyStop();
-
-        // Возвращаем мышь в безопасное место
-        try {
-            Robot robot = new Robot();
-            robot.mouseMove(0, 0);
-
-            // Имитируем нажатие ESC для выхода из возможных меню
-            robot.keyPress(KeyEvent.VK_ESCAPE);
-            robot.keyRelease(KeyEvent.VK_ESCAPE);
-        } catch (AWTException ex) {
-            // Игнорируем
-        }
-
-        // Даем время на освобождение ресурсов
-        try {
-            Thread.sleep(500);
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-        }
-
-        System.out.println("✅ Мышь освобождена. Управление возвращено.");
-    }
-
+    /**
+     * Главный метод запуска консоли
+     */
     public void start() {
         printWelcome();
 
-        while (consoleRunning) {
-            try {
-                printMenu();
-                String choice = scanner.nextLine().trim().toLowerCase();
-                handleCommand(choice);
-            } catch (Exception e) {
-                Logger.error("Ошибка ввода: " + e.getMessage());
-            }
+        while (running) {
+            printMainMenu();
+            int choice = readInt(1, 6);
+            handleMainMenuChoice(choice);
         }
 
         scanner.close();
-
-        // Закрываем скрытое окно при выходе
-        if (hiddenFrame != null) {
-            hiddenFrame.dispose();
-        }
-        if (emergencyTimer != null) {
-            emergencyTimer.stop();
-        }
+        logger.info("Программа завершена");
     }
 
+    /**
+     * Приветственное сообщение
+     */
     private void printWelcome() {
-        System.out.println("\n" +
-                "╔════════════════════════════════════╗\n" +
-                "║     MINESWEEPER BOT v1.0          ║\n" +
-                "║    Управление через консоль       ║\n" +
-                "║    ESC - экстренная остановка     ║\n" +
-                "╚════════════════════════════════════╝");
+        System.out.println("╔══════════════════════════════════════╗");
+        System.out.println("║     Minesweeper Bot v1.0             ║");
+        System.out.println("║     Бот для игры в Сапера            ║");
+        System.out.println("╚══════════════════════════════════════╝");
     }
 
-    private void printMenu() {
-        String status;
-        if (!bot.isRunning()) {
-            status = "⏹️ ОСТАНОВЛЕН";
-        } else if (bot.isPaused()) {
-            status = "⏸️ ПАУЗА";
-        } else {
-            status = "▶️ РАБОТАЕТ";
-        }
-
-        System.out.println("\n📌 Текущий статус: " + status);
-        System.out.println("─────────────────────────────");
-        System.out.println("1. 🚀 Запустить бота");
-        System.out.println("2. 🛑 Остановить бота");
-        System.out.println("3. ⏸️ Пауза/Продолжить");
-        System.out.println("4. 📊 Статистика");
-        System.out.println("5. ⚡ Изменить скорость");
-        System.out.println("6. 🎯 Выбрать стратегию");
-        System.out.println("7. 📐 Калибровка");
-        System.out.println("8. 🧪 Тест мыши"); // НОВЫЙ ПУНКТ
-        System.out.println("9. ❌ Выход");
-        System.out.print("👉 Выберите действие (1-9): ");
+    /**
+     * Главное меню
+     */
+    private void printMainMenu() {
+        System.out.println("\n=== ГЛАВНОЕ МЕНЮ ===");
+        System.out.println("1. Начать новую игру");
+        System.out.println("2. Наблюдать за ботом");
+        System.out.println("3. Запустить тестирование");
+        System.out.println("4. Настройки");
+        System.out.println("5. Статистика");
+        System.out.println("6. Выход");
+        System.out.print("Выберите опцию: ");
     }
 
-    private void handleCommand(String choice) {
+    /**
+     * Обработка выбора главного меню
+     */
+    private void handleMainMenuChoice(int choice) {
         switch (choice) {
-            case "1":
-            case "start":
-            case "🚀":
-                startBot();
+            case 1:
+                startNewGame();
                 break;
+            case 2:
+                watchBot();
+                break;
+            case 3:
+                runBenchmark();
+                break;
+            case 4:
+                showSettings();
+                break;
+            case 5:
+                statistics.printStatistics();
+                break;
+            case 6:
+                running = false;
+                break;
+        }
+    }
 
-            case "2":
-            case "stop":
-            case "🛑":
-                stopBot();
-                break;
+    /**
+     * Начало новой игры
+     */
+    private void startNewGame() {
+        System.out.println("\n=== НОВАЯ ИГРА ===");
 
-            case "3":
-            case "pause":
-            case "⏸️":
-                togglePause();
-                break;
+        // Выбор сложности
+        System.out.println("Выберите сложность:");
+        System.out.println("1. Новичок (9x9, 10 мин)");
+        System.out.println("2. Любитель (16x16, 40 мин)");
+        System.out.println("3. Профессионал (16x30, 99 мин)");
+        System.out.println("4. Свои параметры");
+        System.out.print("Ваш выбор: ");
 
-            case "4":
-            case "stats":
-            case "📊":
-                showStatistics();
-                break;
+        int difficulty = readInt(1, 4);
+        int rows, cols, mines;
 
-            case "5":
-            case "speed":
-            case "⚡":
-                changeSpeed();
+        switch (difficulty) {
+            case 1:
+                rows = 9; cols = 9; mines = 10;
                 break;
-
-            case "6":
-            case "strategy":
-            case "🎯":
-                changeStrategy();
+            case 2:
+                rows = 16; cols = 16; mines = 40;
                 break;
-
-            case "7":
-            case "calibrate":
-            case "📐":
-                calibrate();
-                break;
-            case "8":
-            case "test":
-            case "🧪":
-                testMouse();
-                break;
-            case "9":
-            case "exit":
-            case "❌":
-                exit();
-                break;
-            case "0":
-                case "learn":
-                learningMode();
+            case 3:
+                rows = 16; cols = 30; mines = 99;
                 break;
             default:
-                System.out.println("❌ Неизвестная команда. Введите 1-9");
-        }
-    }
-
-    private void learningMode() {
-        System.out.println("\n🎓 РЕЖИМ ОБУЧЕНИЯ");
-        System.out.println("==================");
-
-        try {
-            Robot robot = new Robot();
-
-            for (int digit = 1; digit <= 8; digit++) {
-                System.out.println("\n📸 Наведите мышь на клетку с цифрой " + digit);
-                System.out.println("и нажмите Enter (или 'q' для выхода)...");
-
-                String input = scanner.nextLine();
-                if (input.equalsIgnoreCase("q")) break;
-
-                // Получаем координаты мыши
-                Point p = MouseInfo.getPointerInfo().getLocation();
-                System.out.println("   Координаты: (" + p.x + ", " + p.y + ")");
-
-                // Захватываем клетку (предполагаем размер 30x30)
-                Rectangle cellRect = new Rectangle(p.x - 15, p.y - 15, 30, 30);
-                BufferedImage cell = robot.createScreenCapture(cellRect);
-
-                // Анализируем
-                int brightness = getSimpleBrightness(cell);
-                double variance = getSimpleVariance(cell);
-
-                System.out.printf("   Яркость: %d, Вариативность: %.2f%n", brightness, variance);
-
-                // Сохраняем
-                String filename = String.format("templates/%d_%d.png",
-                        digit, System.currentTimeMillis());
-
-                File file = new File(filename);
-                file.getParentFile().mkdirs();
-                ImageIO.write(cell, "png", file);
-
-                System.out.println("   ✅ Сохранено: " + filename);
-            }
-
-            System.out.println("\n🎓 Обучение завершено! Перезапустите бота.");
-
-        } catch (Exception e) {
-            System.out.println("❌ Ошибка: " + e.getMessage());
-        }
-    }
-
-    private int getSimpleBrightness(BufferedImage img) {
-        long sum = 0;
-        for (int x = 0; x < img.getWidth(); x+=3) {
-            for (int y = 0; y < img.getHeight(); y+=3) {
-                int rgb = img.getRGB(x, y);
-                int r = (rgb >> 16) & 0xFF;
-                int g = (rgb >> 8) & 0xFF;
-                int b = rgb & 0xFF;
-                sum += (r + g + b) / 3;
-            }
-        }
-        return (int)(sum / ((img.getWidth() * img.getHeight()) / 9));
-    }
-
-    private double getSimpleVariance(BufferedImage img) {
-        List<Double> values = new ArrayList<>();
-        for (int x = 0; x < img.getWidth(); x+=3) {
-            for (int y = 0; y < img.getHeight(); y+=3) {
-                int rgb = img.getRGB(x, y);
-                int r = (rgb >> 16) & 0xFF;
-                int g = (rgb >> 8) & 0xFF;
-                int b = rgb & 0xFF;
-                values.add((r + g + b) / 3.0);
-            }
+                System.out.print("Введите количество строк: ");
+                rows = readInt(1, 100);
+                System.out.print("Введите количество столбцов: ");
+                cols = readInt(1, 100);
+                System.out.print("Введите количество мин: ");
+                mines = readInt(1, rows * cols - 1);
         }
 
-        double mean = values.stream().mapToDouble(d -> d).average().orElse(0);
-        double variance = values.stream().mapToDouble(d -> Math.pow(d - mean, 2)).average().orElse(0);
-        return Math.sqrt(variance);
-    }
+        // Выбор типа бота
+        System.out.println("\nВыберите тип бота:");
+        System.out.println("1. Обычный бот");
+        System.out.println("2. Продвинутый бот");
+        System.out.print("Ваш выбор: ");
 
-    private void testMouse() {
-        System.out.println("\n🧪 ТЕСТ МЫШИ");
-        System.out.println("Бот проверит работу мыши за 5 секунд...");
-        System.out.println("Наблюдайте за курсором!");
+        int botType = readInt(1, 2);
 
-        try {
-            // Получаем MouseController через рефлексию или добавляем метод в MinesweeperBot
-            // Пока просто вызовем тестовый метод
-            // Временно добавим прямой тест
-            Robot robot = new Robot();
-
-            // Тест перемещения
-            System.out.println("1. Перемещение на (500, 500)");
-            robot.mouseMove(500, 500);
-            Thread.sleep(1000);
-
-            System.out.println("2. Левый клик");
-            robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
-            Thread.sleep(100);
-            robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
-            Thread.sleep(1000);
-
-            System.out.println("3. Правый клик");
-            robot.mousePress(InputEvent.BUTTON3_DOWN_MASK);
-            Thread.sleep(100);
-            robot.mouseRelease(InputEvent.BUTTON3_DOWN_MASK);
-            Thread.sleep(1000);
-
-            System.out.println("4. Возврат на (100, 100)");
-            robot.mouseMove(100, 100);
-
-            System.out.println("✅ Тест завершен");
-
-        } catch (Exception e) {
-            System.out.println("❌ Ошибка теста: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    private void startBot() {
-        if (bot.isRunning()) {
-            System.out.println("⚠️ Бот уже запущен!");
-            return;
-        }
-
-        System.out.print("🎲 Введите размеры поля (rows cols mines) [9 9 10]: ");
-        String input = scanner.nextLine();
-
-        if (!input.isEmpty()) {
-            try {
-                String[] parts = input.split(" ");
-                if (parts.length == 3) {
-                    int rows = Integer.parseInt(parts[0]);
-                    int cols = Integer.parseInt(parts[1]);
-                    int mines = Integer.parseInt(parts[2]);
-                    bot.setGameParameters(rows, cols, mines);
-                }
-            } catch (NumberFormatException e) {
-                System.out.println("⚠️ Неверный формат, использую значения по умолчанию");
-            }
-        }
-
-        System.out.println("🚀 Запуск бота через 3 секунды...");
-        System.out.println("Быстро переключитесь на окно с игрой!");
-
-        try {
-            Thread.sleep(3000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-
-        bot.start();
-    }
-
-    private void stopBot() {
-        if (!bot.isRunning()) {
-            System.out.println("⚠️ Бот не запущен!");
-            return;
-        }
-
-        bot.stop();
-    }
-
-    private void togglePause() {
-        bot.togglePause();
-    }
-
-    private void showStatistics() {
-        System.out.println("\n📊 СТАТИСТИКА");
-        System.out.println("────────────────");
-        System.out.printf("Игр сыграно:    %d%n", bot.getGamesPlayed());
-        System.out.printf("Побед:          %d%n", bot.getGamesWon());
-        System.out.printf("Поражений:      %d%n", bot.getGamesLost());
-        System.out.printf("Процент побед:  %.1f%%%n", bot.getWinRate() * 100);
-        System.out.printf("Скорость:       %d мс/ход%n", bot.getDelay());
-        System.out.printf("Статус:         %s%n",
-                bot.isRunning() ? (bot.isPaused() ? "Пауза" : "Работает") : "Остановлен");
-    }
-
-    private void changeSpeed() {
-        System.out.print("⚡ Введите задержку между ходами (мс) [" + bot.getDelay() + "]: ");
-        String input = scanner.nextLine();
-
-        if (!input.isEmpty()) {
-            try {
-                int speed = Integer.parseInt(input);
-                bot.setDelay(speed);
-                System.out.println("✅ Скорость изменена на " + speed + " мс");
-            } catch (NumberFormatException e) {
-                System.out.println("❌ Неверный формат");
-            }
-        }
-    }
-
-    private void changeStrategy() {
-        System.out.println("🎯 Доступные стратегии:");
-        System.out.println("1. Базовая (простые правила)");
-        System.out.println("2. Продвинутая (с вероятностным анализом)");
-        System.out.print("Выберите (1-2): ");
-
-        String choice = scanner.nextLine();
-
-        if (choice.equals("1")) {
-            bot.setStrategy(new BasicStrategy());
-            System.out.println("✅ Выбрана базовая стратегия");
-        } else if (choice.equals("2")) {
-            bot.setStrategy(new AdvancedStrategy());
-            System.out.println("✅ Выбрана продвинутая стратегия");
+        if (botType == 1) {
+            bot = new MinesweeperBot(rows, cols, mines);
         } else {
-            System.out.println("❌ Неверный выбор");
+            bot = new AdvancedMinesweeperBot(rows, cols, mines);
+            // Добавляем стратегии
+            ((AdvancedMinesweeperBot) bot).addStrategy(new BasicStrategy());
+            ((AdvancedMinesweeperBot) bot).addStrategy(new AdvancedStrategy());
+        }
+
+        // Режим игры
+        System.out.println("\nРежим игры:");
+        System.out.println("1. Играть самому");
+        System.out.println("2. Наблюдать за ботом");
+        System.out.print("Ваш выбор: ");
+
+        int mode = readInt(1, 2);
+
+        if (mode == 1) {
+            playManually();
+        } else {
+            watchBotSingle();
         }
     }
 
-    private void calibrate() {
-        System.out.println("\n📐 РЕЖИМ КАЛИБРОВКИ");
-        System.out.println("1. Наведите мышь на ЛЕВЫЙ ВЕРХНИЙ угол поля и нажмите Enter");
-        scanner.nextLine();
+    /**
+     * Ручная игра
+     */
+    private void playManually() {
+        System.out.println("\n=== Ручная игра ===");
+        System.out.println("Введите координаты первого хода:");
+        System.out.print("Строка: ");
+        int firstRow = readInt(0, bot.rows - 1);
+        System.out.print("Столбец: ");
+        int firstCol = readInt(0, bot.cols - 1);
 
-        Point topLeft = MouseController.getMousePosition();
-        System.out.println("   Координаты: (" + topLeft.x + ", " + topLeft.y + ")");
+        bot.placeMines(firstRow, firstCol);
+        bot.processMove(new Move(firstRow, firstCol, false));
+        bot.printBoard();
 
-        System.out.println("\n4. Наведите мышь на ПРАВЫЙ НИЖНИЙ УГОЛ последней клетки");
-        System.out.println("5. Нажмите Enter...");
-        scanner.nextLine();
+        while (bot.isGameActive() && !bot.isGameWon()) {
+            System.out.println("\nВаш ход:");
+            System.out.print("Строка: ");
+            int row = readInt(0, bot.rows - 1);
+            System.out.print("Столбец: ");
+            int col = readInt(0, bot.cols - 1);
+            System.out.print("Действие (1-открыть, 2-флаг): ");
+            int action = readInt(1, 2);
 
-        Point bottomRight = MouseController.getMousePosition();
-        System.out.println("   Координаты: (" + bottomRight.x + ", " + bottomRight.y + ")");
+            Move move = new Move(row, col, action == 2);
+            boolean success = bot.processMove(move);
 
-        // Рассчитываем размер поля
-        int totalWidth = bottomRight.x - topLeft.x;
-        int totalHeight = bottomRight.y - topLeft.y;
+            if (success) {
+                bot.printBoard();
+            } else {
+                System.out.println("Некорректный ход!");
+            }
+        }
 
-        System.out.println("   Общая ширина: " + totalWidth + " пикселей");
-        System.out.println("   Общая высота: " + totalHeight + " пикселей");
-
-        // Спрашиваем размер поля
-        System.out.print("\nВведите количество строк [9]: ");
-        String rowsStr = scanner.nextLine();
-        int rows = rowsStr.isEmpty() ? 9 : Integer.parseInt(rowsStr);
-
-        System.out.print("Введите количество столбцов [9]: ");
-        String colsStr = scanner.nextLine();
-        int cols = colsStr.isEmpty() ? 9 : Integer.parseInt(colsStr);
-
-        // Определяем размер клетки
-        int cellSizeByWidth = totalWidth / cols;
-        int cellSizeByHeight = totalHeight / rows;
-        int cellSize = (cellSizeByWidth + cellSizeByHeight) / 2;
-
-        System.out.println("   Размер клетки (по ширине): " + cellSizeByWidth);
-        System.out.println("   Размер клетки (по высоте): " + cellSizeByHeight);
-        System.out.println("   Используем средний: " + cellSize + " пикселей");
-
-        // Устанавливаем калибровку
-        bot.calibrate(topLeft.x, topLeft.y, cellSize, rows, cols);
-
-        System.out.println("✅ Калибровка завершена!");
-        System.out.println("   offset=(" + topLeft.x + "," + topLeft.y + "), cellSize=" + cellSize);
-        System.out.println("   поле=" + rows + "x" + cols);
+        if (bot.isGameWon()) {
+            System.out.println("\nПОЗДРАВЛЯЮ! Вы выиграли!");
+        } else {
+            System.out.println("\nИгра окончена! Вы проиграли.");
+            bot.printBoard();
+        }
     }
 
-    private void exit() {
-        System.out.println("👋 Завершение работы...");
-        if (bot.isRunning()) {
-            bot.stop();
+    /**
+     * Наблюдение за одной игрой бота
+     */
+    private void watchBotSingle() {
+        System.out.println("\n=== Наблюдение за ботом ===");
+
+        Move firstMove = bot.makeMove();
+        System.out.println("Первый ход: " + firstMove);
+        bot.placeMines(firstMove.getRow(), firstMove.getCol());
+        bot.processMove(firstMove);
+        bot.printBoard();
+
+        int moveCount = 1;
+
+        while (bot.isGameActive() && !bot.isGameWon()) {
+            try {
+                Thread.sleep(config.getAnimationDelay());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            Move move = bot.makeMove();
+            if (move == null) break;
+
+            moveCount++;
+            System.out.println("\nХод " + moveCount + ": " + move);
+            bot.processMove(move);
+            bot.printBoard();
         }
 
-        // Останавливаем таймер и закрываем окно
-        if (emergencyTimer != null) {
-            emergencyTimer.stop();
+        if (bot.isGameWon()) {
+            System.out.println("\nБОТ ВЫИГРАЛ за " + moveCount + " ходов!");
+        } else {
+            System.out.println("\nБот проиграл на " + moveCount + " ходу.");
         }
-        if (hiddenFrame != null) {
-            hiddenFrame.dispose();
+    }
+
+    /**
+     * Наблюдение за ботом в автоматическом режиме
+     */
+    private void watchBot() {
+        System.out.println("\n=== РЕЖИМ НАБЛЮДЕНИЯ ===");
+        System.out.println("Бот будет играть автоматически");
+
+        while (true) {
+            System.out.println("\n1. Одна игра");
+            System.out.println("2. Несколько игр");
+            System.out.println("3. Назад");
+            System.out.print("Выбор: ");
+
+            int choice = readInt(1, 3);
+
+            if (choice == 1) {
+                startNewGame();
+            } else if (choice == 2) {
+                runMultipleGames();
+            } else {
+                break;
+            }
+        }
+    }
+
+    /**
+     * Запуск нескольких игр подряд
+     */
+    private void runMultipleGames() {
+        System.out.print("Введите количество игр: ");
+        int games = readInt(1, 1000);
+
+        System.out.print("Использовать продвинутого бота? (1-да, 2-нет): ");
+        boolean useAdvanced = readInt(1, 2) == 1;
+
+        System.out.println("Выберите сложность:");
+        System.out.println("1. Новичок (9x9, 10 мин)");
+        System.out.println("2. Любитель (16x16, 40 мин)");
+        System.out.println("3. Профессионал (16x30, 99 мин)");
+        System.out.print("Выбор: ");
+
+        int difficulty = readInt(1, 3);
+        int rows, cols, mines;
+
+        switch (difficulty) {
+            case 1:
+                rows = 9; cols = 9; mines = 10;
+                break;
+            case 2:
+                rows = 16; cols = 16; mines = 40;
+                break;
+            default:
+                rows = 16; cols = 30; mines = 99;
         }
 
-        consoleRunning = false;
-        System.out.println("До свидания!");
+        System.out.println("\nЗапуск " + games + " игр...");
+
+        for (int i = 0; i < games; i++) {
+            System.out.print("Игра " + (i + 1) + ": ");
+
+            MinesweeperBot testBot;
+            if (useAdvanced) {
+                testBot = new AdvancedMinesweeperBot(rows, cols, mines);
+                ((AdvancedMinesweeperBot) testBot).addStrategy(new BasicStrategy());
+                ((AdvancedMinesweeperBot) testBot).addStrategy(new AdvancedStrategy());
+            } else {
+                testBot = new MinesweeperBot(rows, cols, mines);
+            }
+
+            long startTime = System.currentTimeMillis();
+            int moves = 0;
+
+            // Первый ход
+            Move firstMove = testBot.makeMove();
+            testBot.placeMines(firstMove.getRow(), firstMove.getCol());
+            testBot.processMove(firstMove);
+            moves++;
+
+            // Играем до конца
+            while (testBot.isGameActive() && !testBot.isGameWon()) {
+                Move move = testBot.makeMove();
+                if (move == null) break;
+                testBot.processMove(move);
+                moves++;
+            }
+
+            boolean won = testBot.isGameWon();
+            long time = System.currentTimeMillis() - startTime;
+
+            statistics.recordGame(won, moves, time, useAdvanced ? "advanced" : "basic");
+
+            System.out.println((won ? "ПОБЕДА" : "ПОРАЖЕНИЕ") +
+                    " за " + moves + " ходов, " + time + " мс");
+        }
+
+        System.out.println("\nТестирование завершено!");
+        statistics.printStatistics();
+    }
+
+    /**
+     * Запуск бенчмарка
+     */
+    private void runBenchmark() {
+        System.out.println("\n=== БЕНЧМАРК ===");
+        System.out.println("Тестирование производительности...");
+
+        int[] sizes = {9, 16, 16};
+        int[] mines = {10, 40, 99};
+        String[] names = {"Новичок", "Любитель", "Профессионал"};
+
+        for (int test = 0; test < sizes.length; test++) {
+            System.out.println("\nТест " + names[test] + ":");
+
+            // Тест обычного бота
+            MinesweeperBot basicBot = new MinesweeperBot(sizes[test], sizes[test], mines[test]);
+            long startTime = System.currentTimeMillis();
+
+            Move firstMove = basicBot.makeMove();
+            basicBot.placeMines(firstMove.getRow(), firstMove.getCol());
+            basicBot.processMove(firstMove);
+
+            int moves = 1;
+            while (basicBot.isGameActive() && !basicBot.isGameWon() && moves < 100) {
+                Move move = basicBot.makeMove();
+                if (move == null) break;
+                basicBot.processMove(move);
+                moves++;
+            }
+
+            long basicTime = System.currentTimeMillis() - startTime;
+
+            // Тест продвинутого бота
+            AdvancedMinesweeperBot advancedBot = new AdvancedMinesweeperBot(
+                    sizes[test], sizes[test], mines[test]);
+            advancedBot.addStrategy(new BasicStrategy());
+            advancedBot.addStrategy(new AdvancedStrategy());
+
+            startTime = System.currentTimeMillis();
+
+            firstMove = advancedBot.makeMove();
+            advancedBot.placeMines(firstMove.getRow(), firstMove.getCol());
+            advancedBot.processMove(firstMove);
+
+            moves = 1;
+            while (advancedBot.isGameActive() && !advancedBot.isGameWon() && moves < 100) {
+                Move move = advancedBot.makeMove();
+                if (move == null) break;
+                advancedBot.processMove(move);
+                moves++;
+            }
+
+            long advancedTime = System.currentTimeMillis() - startTime;
+
+            System.out.printf("  Обычный бот: %d мс\n", basicTime);
+            System.out.printf("  Продвинутый бот: %d мс\n", advancedTime);
+            System.out.printf("  Разница: %.2fx\n", (double) advancedTime / basicTime);
+        }
+    }
+
+    /**
+     * Настройки
+     */
+    private void showSettings() {
+        System.out.println("\n=== НАСТРОЙКИ ===");
+        System.out.println("1. Задержка анимации: " + config.getAnimationDelay() + " мс");
+        System.out.println("2. Уровень логирования: " + config.getLogLevel());
+        System.out.println("3. Показывать вероятности: " + (config.showProbabilities() ? "Да" : "Нет"));
+        System.out.println("4. Режим отладки: " + (config.isDebugMode() ? "Да" : "Нет"));
+        System.out.println("5. Назад");
+        System.out.print("Выберите параметр для изменения: ");
+
+        int choice = readInt(1, 5);
+
+        switch (choice) {
+            case 1:
+                System.out.print("Введите задержку (мс): ");
+                int delay = readInt(0, 5000);
+                config.setAnimationDelay(delay);
+                break;
+            case 2:
+                System.out.println("Уровни: DEBUG, INFO, WARNING, ERROR");
+                System.out.print("Введите уровень: ");
+                String level = scanner.next();
+                config.setLogLevel(level);
+                break;
+            case 3:
+                config.setShowProbabilities(!config.showProbabilities());
+                break;
+            case 4:
+                config.setDebugMode(!config.isDebugMode());
+                break;
+        }
+
+        config.save();
+        logger.info("Настройки сохранены");
+    }
+
+    /**
+     * Чтение целого числа с проверкой
+     */
+    private int readInt(int min, int max) {
+        while (true) {
+            try {
+                int value = scanner.nextInt();
+                if (value >= min && value <= max) {
+                    return value;
+                }
+                System.out.print("Введите число от " + min + " до " + max + ": ");
+            } catch (Exception e) {
+                System.out.print("Некорректный ввод. Повторите: ");
+                scanner.next();
+            }
+        }
     }
 }

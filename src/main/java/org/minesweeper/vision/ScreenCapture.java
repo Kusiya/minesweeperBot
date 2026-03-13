@@ -1,89 +1,211 @@
 package org.minesweeper.vision;
 
+import org.minesweeper.utils.Logger;
 import org.minesweeper.utils.Config;
 
+import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
 
+/**
+ * Захват экрана для получения изображения игрового поля.
+ */
 public class ScreenCapture {
     private Robot robot;
-    private Rectangle gameArea;
-    private int cellSize;
-    private int offsetX;
-    private int offsetY;
-    private int rows;
-    private int cols;
+    private Rectangle screenRect;
+    private Logger logger;
     private Config config;
 
     public ScreenCapture() throws AWTException {
         this.robot = new Robot();
+        this.logger = Logger.getInstance();
         this.config = Config.getInstance();
+        this.screenRect = new Rectangle(Toolkit.getDefaultToolkit().getScreenSize());
 
-        // Загружаем значения из конфига
-        this.offsetX = config.getInt("offsetX", 0);
-        this.offsetY = config.getInt("offsetY", 0);
-        this.cellSize = config.getInt("cellSize", 30);
-        this.rows = config.getInt("rows", 9);
-        this.cols = config.getInt("cols", 9);
-
-        updateGameArea();
-
-        System.out.println("🖥️ ScreenCapture инициализирован");
-        System.out.println("   offset: (" + offsetX + "," + offsetY + ")");
-        System.out.println("   cellSize: " + cellSize);
-        System.out.println("   поле: " + rows + "x" + cols);
+        logger.info("ScreenCapture инициализирован, размер экрана: " + screenRect.width + "x" + screenRect.height);
     }
 
-    private void updateGameArea() {
-        int width = cols * cellSize;
-        int height = rows * cellSize;
-        this.gameArea = new Rectangle(offsetX, offsetY, width, height);
-
-        System.out.println("📐 Область захвата: (" + offsetX + "," + offsetY +
-                ") размер " + width + "x" + height);
-    }
-
-    public BufferedImage captureGameArea() {
-        BufferedImage screenshot = robot.createScreenCapture(gameArea);
-        System.out.println("📸 Скриншот сделан: " + screenshot.getWidth() + "x" + screenshot.getHeight());
+    /**
+     * Захват всего экрана
+     */
+    public BufferedImage captureScreen() {
+        BufferedImage screenshot = robot.createScreenCapture(screenRect);
+        logger.debug("Сделан скриншот экрана");
         return screenshot;
     }
 
-    public BufferedImage getCellImage(BufferedImage fullImage, int row, int col) {
-        int x = col * cellSize;
-        int y = row * cellSize;
+    /**
+     * Захват области экрана
+     */
+    public BufferedImage captureArea(Rectangle area) {
+        BufferedImage screenshot = robot.createScreenCapture(area);
+        logger.debug("Сделан скриншот области: " + area);
+        return screenshot;
+    }
 
-        if (x + cellSize <= fullImage.getWidth() && y + cellSize <= fullImage.getHeight()) {
-            return fullImage.getSubimage(x, y, cellSize, cellSize);
-        } else {
-            System.err.println("❌ Клетка [" + row + "," + col + "] вне границ: x=" + x + ", y=" + y);
-            return null;
+    /**
+     * Захват области игрового поля
+     */
+    public BufferedImage captureBoardArea(Rectangle boardBounds) {
+        return captureArea(boardBounds);
+    }
+
+    /**
+     * Захват конкретной клетки
+     */
+    public BufferedImage captureCell(int row, int col, int cellSize, Point boardOffset) {
+        int x = boardOffset.x + col * cellSize;
+        int y = boardOffset.y + row * cellSize;
+        Rectangle cellRect = new Rectangle(x, y, cellSize, cellSize);
+
+        return captureArea(cellRect);
+    }
+
+    /**
+     * Захват всех клеток доски
+     */
+    public BufferedImage[][] captureAllCells(int rows, int cols, int cellSize, Point boardOffset) {
+        BufferedImage[][] cells = new BufferedImage[rows][cols];
+
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                cells[i][j] = captureCell(i, j, cellSize, boardOffset);
+            }
+        }
+
+        logger.debug("Захвачено " + (rows * cols) + " клеток");
+        return cells;
+    }
+
+    /**
+     * Сохранение скриншота в файл
+     */
+    public void saveScreenshot(BufferedImage image, String filename) {
+        try {
+            File outputFile = new File("screenshots/" + filename);
+            outputFile.getParentFile().mkdirs();
+            ImageIO.write(image, "png", outputFile);
+            logger.info("Скриншот сохранен: " + outputFile.getAbsolutePath());
+        } catch (IOException e) {
+            logger.error("Ошибка сохранения скриншота", e);
         }
     }
 
-    // Обновленный метод калибровки
-    public void setCalibration(int offsetX, int offsetY, int cellSize, int rows, int cols) {
-        this.offsetX = offsetX;
-        this.offsetY = offsetY;
-        this.cellSize = cellSize;
-        this.rows = rows;
-        this.cols = cols;
+    /**
+     * Поиск игрового поля на экране
+     */
+    public Rectangle findBoardArea() {
+        logger.info("Поиск игрового поля на экране...");
 
-        // Сохраняем в конфиг
-        config.setInt("offsetX", offsetX);
-        config.setInt("offsetY", offsetY);
-        config.setInt("cellSize", cellSize);
-        config.setInt("rows", rows);
-        config.setInt("cols", cols);
-        config.save();
+        BufferedImage screen = captureScreen();
+        int width = screen.getWidth();
+        int height = screen.getHeight();
 
-        updateGameArea();
+        // Поиск характерных цветов сапера
+        int boardTop = -1, boardBottom = -1, boardLeft = -1, boardRight = -1;
+
+        // Проходим по строкам в поиске границ
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int rgb = screen.getRGB(x, y);
+                Color color = new Color(rgb);
+
+                // Проверяем типичные цвета сапера
+                if (isBoardColor(color)) {
+                    if (boardTop == -1) boardTop = y;
+                    boardBottom = y;
+                    if (boardLeft == -1 || x < boardLeft) boardLeft = x;
+                    if (x > boardRight) boardRight = x;
+                }
+            }
+        }
+
+        if (boardTop != -1 && boardBottom != -1 && boardLeft != -1 && boardRight != -1) {
+            Rectangle boardArea = new Rectangle(
+                    boardLeft, boardTop,
+                    boardRight - boardLeft + 1,
+                    boardBottom - boardTop + 1
+            );
+            logger.info("Найдена область доски: " + boardArea);
+            return boardArea;
+        }
+
+        logger.warning("Не удалось найти область доски");
+        return null;
     }
 
-    // Геттеры
-    public int getOffsetX() { return offsetX; }
-    public int getOffsetY() { return offsetY; }
-    public int getCellSize() { return cellSize; }
-    public int getRows() { return rows; }
-    public int getCols() { return cols; }
+    /**
+     * Проверка, является ли цвет цветом доски сапера
+     */
+    private boolean isBoardColor(Color color) {
+        // Типичные цвета для сапера (можно настроить)
+        int r = color.getRed();
+        int g = color.getGreen();
+        int b = color.getBlue();
+
+        // Серые тона
+        if (Math.abs(r - g) < 20 && Math.abs(g - b) < 20) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Определение размера клетки
+     */
+    public int detectCellSize(Rectangle boardArea, int expectedRows, int expectedCols) {
+        int width = boardArea.width;
+        int height = boardArea.height;
+
+        int cellWidth = width / expectedCols;
+        int cellHeight = height / expectedRows;
+
+        // Предполагаем квадратные клетки
+        int cellSize = Math.min(cellWidth, cellHeight);
+
+        logger.info("Определен размер клетки: " + cellSize + "px");
+        return cellSize;
+    }
+
+    /**
+     * Определение границ доски с помощью шаблонов
+     */
+    public BoardCalibrationResult calibrateWithTemplates() {
+        logger.info("Калибровка с использованием шаблонов...");
+
+        // Здесь можно реализовать более сложную калибровку
+        // с использованием поиска шаблонов углов доски
+
+        return null;
+    }
+
+    /**
+     * Класс для результатов калибровки
+     */
+    public static class BoardCalibrationResult {
+        public final Rectangle boardArea;
+        public final int cellSize;
+        public final int rows;
+        public final int cols;
+
+        public BoardCalibrationResult(Rectangle boardArea, int cellSize, int rows, int cols) {
+            this.boardArea = boardArea;
+            this.cellSize = cellSize;
+            this.rows = rows;
+            this.cols = cols;
+        }
+
+        public Point getBoardOffset() {
+            return new Point(boardArea.x, boardArea.y);
+        }
+
+        @Override
+        public String toString() {
+            return String.format("BoardCalibration{area=%s, cellSize=%d, grid=%dx%d}",
+                    boardArea, cellSize, rows, cols);
+        }
+    }
 }

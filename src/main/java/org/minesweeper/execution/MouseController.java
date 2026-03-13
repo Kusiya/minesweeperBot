@@ -1,102 +1,215 @@
 package org.minesweeper.execution;
 
-import org.minesweeper.core.Move;
 import org.minesweeper.utils.Logger;
+import org.minesweeper.utils.Config;
 
 import java.awt.*;
 import java.awt.event.InputEvent;
 
+/**
+ * Контроллер для эмуляции действий мыши.
+ * Позволяет боту физически кликать по клеткам в реальной игре.
+ */
 public class MouseController {
-    private Robot robot;
-    private int offsetX;
-    private int offsetY;
-    private int cellSize;
-    private boolean debugMode = true;
+    private Robot robot;                    // Робот для эмуляции ввода
+    private int cellSize;                    // Размер клетки в пикселях
+    private Point boardOffset;               // Смещение доски на экране
+    private int clickDelay;                  // Задержка между кликами (мс)
+    private Logger logger;                    // Система логирования
+    private boolean debugMode;                // Режим отладки (без реальных кликов)
 
-    public MouseController() throws AWTException {
+    /**
+     * Инициализация с параметрами экрана
+     */
+    public MouseController(int cellSize, Point boardOffset) throws AWTException {
+        this(cellSize, boardOffset, 1000, false);
+    }
+
+    /**
+     * Полная инициализация с дополнительными параметрами
+     */
+    public MouseController(int cellSize, Point boardOffset, int clickDelay, boolean debugMode)
+            throws AWTException {
         this.robot = new Robot();
-        this.offsetX = 902;  // из вашей калибровки
-        this.offsetY = 307;  // из вашей калибровки
-        this.cellSize = 23;  // из вашей калибровки
+        this.cellSize = cellSize;
+        this.boardOffset = boardOffset;
+        this.clickDelay = clickDelay;
+        this.debugMode = debugMode;
+        this.logger = Logger.getInstance();
 
-        Logger.info("🖱️ MouseController инициализирован");
+        // Загружаем настройки из конфига
+        Config config = Config.getInstance();
+        this.clickDelay = config.getClickDelay();
+
+        logger.info("MouseController инициализирован: cellSize=" + cellSize +
+                ", offset=" + boardOffset + ", delay=" + clickDelay);
     }
 
-    public void executeMove(Move move) {
-        if (move == null) return;
+    /**
+     * Клик по клетке с координатами (row, col)
+     */
+    public void clickCell(int row, int col) {
+        if (debugMode) {
+            logger.debug("[DEBUG] Клик по клетке (" + row + ", " + col + ")");
+            return;
+        }
+
+        Point screenPos = getScreenCoordinates(row, col);
+        moveAndClick(screenPos, InputEvent.BUTTON1_DOWN_MASK);
+        logger.debug("Клик по клетке (" + row + ", " + col + ") в " + screenPos);
+    }
+
+    /**
+     * Правый клик для установки флага
+     */
+    public void rightClickCell(int row, int col) {
+        if (debugMode) {
+            logger.debug("[DEBUG] Правый клик по клетке (" + row + ", " + col + ")");
+            return;
+        }
+
+        Point screenPos = getScreenCoordinates(row, col);
+        moveAndClick(screenPos, InputEvent.BUTTON3_DOWN_MASK);
+        logger.debug("Правый клик по клетке (" + row + ", " + col + ") в " + screenPos);
+    }
+
+    /**
+     * Двойной клик для быстрого открытия окружающих клеток
+     */
+    public void doubleClickCell(int row, int col) {
+        if (debugMode) {
+            logger.debug("[DEBUG] Двойной клик по клетке (" + row + ", " + col + ")");
+            return;
+        }
+
+        Point screenPos = getScreenCoordinates(row, col);
+
+        // Первый клик
+        moveMouse(screenPos);
+        robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
+        robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
+
+        // Небольшая задержка между кликами
+        robot.delay(200);
+
+        // Второй клик
+        robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
+        robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
+
+        logger.debug("Двойной клик по клетке (" + row + ", " + col + ") в " + screenPos);
+    }
+
+    /**
+     * Перемещение мыши с последующим кликом
+     */
+    private void moveAndClick(Point point, int button) {
+        moveMouse(point);
+        robot.delay(clickDelay / 2);
+
+        robot.mousePress(button);
+        robot.delay(200);
+        robot.mouseRelease(button);
+
+        robot.delay(clickDelay);
+    }
+
+    /**
+     * Перемещение мыши в указанную точку
+     */
+    private void moveMouse(Point point) {
+        // Плавное перемещение (можно добавить анимацию)
+        robot.mouseMove(point.x, point.y);
+        robot.delay(200);
+    }
+
+    /**
+     * Преобразование координат клетки в экранные координаты
+     */
+    private Point getScreenCoordinates(int row, int col) {
+        int x = boardOffset.x + col * cellSize + cellSize / 2;
+        int y = boardOffset.y + row * cellSize + cellSize / 2;
+        return new Point(x, y);
+    }
+
+    /**
+     * Калибровка: определение границ доски
+     */
+    public static BoardCalibrationResult calibrate() throws AWTException {
+        Robot robot = new Robot();
+        Logger logger = Logger.getInstance();
+
+        logger.info("Начало калибровки. Наведите мышь на левый верхний угол доски...");
 
         try {
-            int screenX = offsetX + move.getCol() * cellSize + cellSize / 2;
-            int screenY = offsetY + move.getRow() * cellSize + cellSize / 2;
-
-            Logger.info("🎯 Цель: клетка [" + move.getRow() + "," + move.getCol() + "] -> (" + screenX + ", " + screenY + ")");
-            Logger.info("   Тип хода: " + (move.isFlag() ? "ФЛАГ" : "ОТКРЫТЬ"));
-
-            // Перемещаем мышь
-            moveMouse(screenX, screenY);
-            robot.delay(200);
-
-            // Выполняем клик в зависимости от типа хода
-            if (move.isFlag()) {
-                Logger.info("   🚩 Выполняю ПРАВЫЙ клик (флаг)");
-                rightClick();
-            } else {
-                Logger.info("   🔴 Выполняю ЛЕВЫЙ клик (открыть)");
-                leftClick();
-            }
-
-            robot.delay(200);
-
-        } catch (Exception e) {
-            Logger.error("Ошибка при выполнении хода: " + e.getMessage());
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
-    }
 
-    private void moveMouse(int x, int y) {
+        Point topLeft = MouseInfo.getPointerInfo().getLocation();
+        logger.info("Левый верхний угол: " + topLeft);
+
+        logger.info("Наведите мышь на правый нижний угол доски...");
+
         try {
-            robot.mouseMove(x, y);
-            robot.delay(100);
-        } catch (Exception e) {
-            Logger.error("Ошибка перемещения мыши: " + e.getMessage());
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
+
+        Point bottomRight = MouseInfo.getPointerInfo().getLocation();
+        logger.info("Правый нижний угол: " + bottomRight);
+
+        // Вычисляем размер доски
+        int boardWidth = bottomRight.x - topLeft.x;
+        int boardHeight = bottomRight.y - topLeft.y;
+
+        logger.info("Размер доски: " + boardWidth + "x" + boardHeight);
+
+        // Запрашиваем количество клеток
+        // В реальном приложении можно попросить пользователя ввести
+
+        return new BoardCalibrationResult(topLeft, bottomRight, boardWidth, boardHeight);
     }
 
-    private void leftClick() {
-        try {
-            robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
-            robot.delay(50);
-            robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
-            robot.delay(50);
-            Logger.debug("   Левый клик выполнен");
-        } catch (Exception e) {
-            Logger.error("Ошибка левого клика: " + e.getMessage());
+    /**
+     * Установка режима отладки
+     */
+    public void setDebugMode(boolean debugMode) {
+        this.debugMode = debugMode;
+        logger.info("Режим отладки: " + (debugMode ? "включен" : "выключен"));
+    }
+
+    /**
+     * Результат калибровки
+     */
+    public static class BoardCalibrationResult {
+        public final Point topLeft;
+        public final Point bottomRight;
+        public final int width;
+        public final int height;
+
+        public BoardCalibrationResult(Point topLeft, Point bottomRight, int width, int height) {
+            this.topLeft = topLeft;
+            this.bottomRight = bottomRight;
+            this.width = width;
+            this.height = height;
         }
-    }
 
-    private void rightClick() {
-        try {
-            robot.mousePress(InputEvent.BUTTON3_DOWN_MASK);
-            robot.delay(50);
-            robot.mouseRelease(InputEvent.BUTTON3_DOWN_MASK);
-            robot.delay(50);
-            Logger.debug("   Правый клик выполнен");
-        } catch (Exception e) {
-            Logger.error("Ошибка правого клика: " + e.getMessage());
+        /**
+         * Вычисление размера клетки при известном количестве клеток
+         */
+        public int calculateCellSize(int rows, int cols) {
+            int cellWidth = width / cols;
+            int cellHeight = height / rows;
+            // Предполагаем квадратные клетки
+            return Math.min(cellWidth, cellHeight);
         }
-    }
 
-    public static Point getMousePosition() {
-        return MouseInfo.getPointerInfo().getLocation();
-    }
-
-    public void setOffset(int x, int y) {
-        this.offsetX = x;
-        this.offsetY = y;
-        Logger.info("MouseController offset: (" + x + ", " + y + ")");
-    }
-
-    public void setCellSize(int size) {
-        this.cellSize = size;
-        Logger.info("MouseController cellSize: " + size);
+        @Override
+        public String toString() {
+            return String.format("BoardCalibration{topLeft=%s, bottomRight=%s, size=%dx%d}",
+                    topLeft, bottomRight, width, height);
+        }
     }
 }

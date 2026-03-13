@@ -1,354 +1,232 @@
 package org.minesweeper.vision;
 
-import org.minesweeper.core.GameState;
+import org.minesweeper.utils.Logger;
+import org.minesweeper.utils.Config;
 
-import java.awt.*;
+import java.awt.Color;
 import java.awt.image.BufferedImage;
-import java.util.*;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
-public class TemplateCellRecognizer {
-    private final TemplateLoader templateLoader;
+/**
+ * Распознавание клеток по шаблонам.
+ * Сравнивает скриншот клетки с шаблонами цифр, мин и т.д.
+ */
+public class TemplateCellRecognizer implements CellRecognizer {
+    private TemplateLoader templateLoader;
+    private double similarityThreshold;
+    private Logger logger;
+    private Config config;
+    private Map<String, Double> templateCache;
 
-    public static final int UNKNOWN = -2;
-    public static final int MINE = -1;
-    public static final int FLAG = -3;
-    public static final int EMPTY = 0;
-
-    private boolean debugMode = true;
-
-    // Индивидуальные пороги для каждой цифры (на основе ваших данных)
-    private static final Map<Integer, Double> DIGIT_THRESHOLDS = new HashMap<>();
-    static {
-        DIGIT_THRESHOLDS.put(1, 38.0);
-        DIGIT_THRESHOLDS.put(2, 40.0);
-        DIGIT_THRESHOLDS.put(3, 37.0); // 3 хорошо определяется
-        DIGIT_THRESHOLDS.put(4, 43.0);
-        DIGIT_THRESHOLDS.put(5, 48.0);
-        DIGIT_THRESHOLDS.put(6, 41.0);
-        DIGIT_THRESHOLDS.put(7, 45.0);
-        DIGIT_THRESHOLDS.put(8, 39.0);
+    public TemplateCellRecognizer(TemplateLoader loader) {
+        this.templateLoader = loader;
+        this.logger = Logger.getInstance();
+        this.config = Config.getInstance();
+        this.similarityThreshold = config.getSimilarityThreshold();
+        this.templateCache = new HashMap<>();
     }
 
-    // Веса для каждой цифры (чем меньше вес, тем выше приоритет)
-    private static final Map<Integer, Double> DIGIT_WEIGHTS = new HashMap<>();
-    static {
-        DIGIT_WEIGHTS.put(1, 1.0);
-        DIGIT_WEIGHTS.put(2, 0.98);
-        DIGIT_WEIGHTS.put(3, 0.95); // 3 имеет высокий приоритет
-        DIGIT_WEIGHTS.put(4, 1.02);
-        DIGIT_WEIGHTS.put(5, 1.05);
-        DIGIT_WEIGHTS.put(6, 0.98);
-        DIGIT_WEIGHTS.put(7, 1.02);
-        DIGIT_WEIGHTS.put(8, 0.97);
+    @Override
+    public CellState recognize(BufferedImage cellImage) {
+        RecognitionResult result = recognizeWithConfidence(cellImage);
+        return result.getState();
     }
 
-    private static final double EMPTY_THRESHOLD = 28.0;  // Повысили до 28
-    private static final double CLOSED_THRESHOLD = 45.0; // CLOSED обычно 40-50
+    @Override
+    public RecognitionResult recognizeWithConfidence(BufferedImage cellImage) {
+        templateCache.clear();
 
-    public TemplateCellRecognizer(TemplateLoader templateLoader) {
-        this.templateLoader = templateLoader;
-        System.out.println("🖼️ TemplateCellRecognizer инициализирован");
-    }
-
-    public int recognizeCell(BufferedImage cellImage, int row, int col) {
-        if (debugMode && row >= 0 && col >= 0) {
-            System.out.print("\n🔍 Клетка [" + row + "," + col + "]");
+        // 1. Проверка на закрытую клетку
+        RecognitionResult closedResult = compareWithTemplate(cellImage, "closed");
+        if (closedResult != null && closedResult.getConfidence() > similarityThreshold) {
+            return closedResult;
         }
 
-        // 1. Анализируем яркость и вариативность
-        int brightness = getAverageBrightness(cellImage);
-        double colorVariance = getColorVariance(cellImage);
-
-        if (debugMode) {
-            System.out.print(" ярк=" + brightness + " var=" + String.format("%.2f", colorVariance));
+        // 2. Проверка на флаг
+        RecognitionResult flagResult = compareWithTemplate(cellImage, "flag");
+        if (flagResult != null && flagResult.getConfidence() > similarityThreshold) {
+            return flagResult;
         }
 
-        // 2. Проверка на флаг (красный)
-        if (isRed(cellImage)) {
-            if (debugMode) System.out.println(" -> 🚩 ФЛАГ");
-            return FLAG;
-        }
-        if (brightness < 70 && colorVariance < 30) {
-            if (debugMode) System.out.println(" -> 💥 МИНА");
-            return MINE;
+        // 3. Проверка на мину
+        RecognitionResult mineResult = compareWithTemplate(cellImage, "mine");
+        if (mineResult != null && mineResult.getConfidence() > similarityThreshold) {
+            return mineResult;
         }
 
-
-        // 3. Получаем ВСЕ шаблоны
-        Map<Integer, List<BufferedImage>> allTemplates = templateLoader.getAllTemplates();
-        Map<Integer, Double> bestDiffs = new HashMap<>();
-
-        // Для каждого значения находим ЛУЧШЕЕ совпадение среди всех его шаблонов
-        for (Map.Entry<Integer, List<BufferedImage>> entry : allTemplates.entrySet()) {
-            int value = entry.getKey();
-            List<BufferedImage> templates = entry.getValue();
-
-            if (templates.isEmpty()) continue;
-
-            double bestDiff = Double.MAX_VALUE;
-            for (BufferedImage template : templates) {
-                double diff = compareImages(cellImage, template);
-                if (diff < bestDiff) {
-                    bestDiff = diff;
-                }
-            }
-            bestDiffs.put(value, bestDiff);
+        // 4. Проверка на пустую клетку
+        RecognitionResult emptyResult = compareWithTemplate(cellImage, "empty");
+        if (emptyResult != null && emptyResult.getConfidence() > similarityThreshold) {
+            return emptyResult;
         }
 
-        // 4. Выводим результаты
-        double closedDiff = bestDiffs.getOrDefault(UNKNOWN, 999.0);
-        double emptyDiff = bestDiffs.getOrDefault(EMPTY, 999.0);
+        // 5. Проверка на цифры (0-8)
+        double bestConfidence = 0;
+        CellState bestState = CellState.UNKNOWN;
+        String bestMethod = "none";
 
-        if (debugMode) {
-            System.out.println();
-            System.out.printf("      CLOSED: %.2f%n", closedDiff);
-            System.out.printf("      EMPTY:  %.2f%n", emptyDiff);
-
-            // Сортируем цифры по разнице
-            List<Map.Entry<Integer, Double>> sortedDigits = new ArrayList<>();
-            for (int num = 1; num <= 8; num++) {
-                if (bestDiffs.containsKey(num)) {
-                    sortedDigits.add(new AbstractMap.SimpleEntry<>(num, bestDiffs.get(num)));
-                }
-            }
-            sortedDigits.sort(Map.Entry.comparingByValue());
-
-            for (Map.Entry<Integer, Double> e : sortedDigits) {
-                System.out.printf("      %d:      %.2f%n", e.getKey(), e.getValue());
-            }
-        }
-
-        // 5. ПРОВЕРКА КАЖДОЙ ЦИФРЫ ПО ИНДИВИДУАЛЬНОМУ ПОРОГУ
-        for (int num = 1; num <= 8; num++) {
-            if (bestDiffs.containsKey(num)) {
-                double rawDiff = bestDiffs.get(num);
-                double threshold = DIGIT_THRESHOLDS.getOrDefault(num, 40.0);
-                double weight = DIGIT_WEIGHTS.getOrDefault(num, 1.0);
-
-                // Взвешенная разница
-                double weightedDiff = rawDiff * weight;
-
-                if (weightedDiff < threshold) {
-                    if (debugMode) {
-                        System.out.printf("   👉 ЦИФРА %d (разница %.2f, вес %.2f, взвешенная %.2f)%n",
-                                num, rawDiff, weight, weightedDiff);
-                    }
-                    return num;
+        for (int i = 0; i <= 8; i++) {
+            RecognitionResult digitResult = compareWithTemplate(cellImage, "digit_" + i);
+            if (digitResult != null) {
+                if (digitResult.getConfidence() > bestConfidence) {
+                    bestConfidence = digitResult.getConfidence();
+                    bestState = CellState.fromNumber(i);
+                    bestMethod = digitResult.getMethod();
                 }
             }
         }
 
-        // 6. Проверка на закрытую клетку
-        if (closedDiff < CLOSED_THRESHOLD) {
-            if (debugMode) System.out.println("   👉 ЗАКРЫТАЯ");
-            return UNKNOWN;
+        if (bestConfidence > similarityThreshold) {
+            return new RecognitionResult(bestState, bestConfidence, bestMethod);
         }
 
-        // 7. Проверка на пустую клетку
-        if (emptyDiff < EMPTY_THRESHOLD) {
-            if (debugMode) System.out.println("   👉 ПУСТАЯ");
-            return EMPTY;
-        }
-
-        // 8. Если ничего не подошло - проверяем по яркости
-        if (brightness > 200 && colorVariance < 20) {
-            if (debugMode) System.out.println("   👉 ПУСТАЯ (по яркости)");
-            return EMPTY;
-        }
-
-        if (brightness > 100 && brightness < 180 && colorVariance < 30) {
-            if (debugMode) System.out.println("   👉 ЗАКРЫТАЯ (по яркости)");
-            return UNKNOWN;
-        }
-
-        if (debugMode) System.out.println("   👉 ПО УМОЛЧАНИЮ = ЗАКРЫТАЯ");
-        return UNKNOWN;
+        // 6. Если ничего не распознано, пробуем по цвету
+        return recognizeByColor(cellImage);
     }
 
-    private double getColorVariance(BufferedImage image) {
-        int w = image.getWidth();
-        int h = image.getHeight();
+    /**
+     * Сравнение с конкретным шаблоном
+     */
+    private RecognitionResult compareWithTemplate(BufferedImage image, String templateName) {
+        BufferedImage template = templateLoader.getTemplate(templateName);
+        if (template == null) {
+            return null;
+        }
 
-        // Собираем все значения яркости
-        java.util.ArrayList<Double> values = new java.util.ArrayList<>();
+        // Проверяем кэш
+        String cacheKey = templateName + "_" + image.hashCode();
+        if (templateCache.containsKey(cacheKey)) {
+            double cachedConfidence = templateCache.get(cacheKey);
+            CellState state = mapTemplateNameToState(templateName);
+            return new RecognitionResult(state, cachedConfidence, "template(cached)");
+        }
 
-        for (int x = 0; x < w; x += 2) {
-            for (int y = 0; y < h; y += 2) {
-                int rgb = image.getRGB(x, y);
-                int r = (rgb >> 16) & 0xFF;
-                int g = (rgb >> 8) & 0xFF;
-                int b = rgb & 0xFF;
+        double similarity = calculateSimilarity(image, template);
+        templateCache.put(cacheKey, similarity);
 
-                double brightness = (r + g + b) / 3.0;
-                values.add(brightness);
+        CellState state = mapTemplateNameToState(templateName);
+        return new RecognitionResult(state, similarity, "template");
+    }
+
+    /**
+     * Преобразование имени шаблона в состояние
+     */
+    private CellState mapTemplateNameToState(String templateName) {
+        if (templateName.startsWith("digit_")) {
+            int digit = Integer.parseInt(templateName.substring(6));
+            return CellState.fromNumber(digit);
+        }
+
+        switch (templateName) {
+            case "closed": return CellState.CLOSED;
+            case "flag": return CellState.FLAG;
+            case "mine": return CellState.MINE;
+            case "empty": return CellState.EMPTY;
+            default: return CellState.UNKNOWN;
+        }
+    }
+
+    /**
+     * Вычисление схожести двух изображений
+     */
+    private double calculateSimilarity(BufferedImage img1, BufferedImage img2) {
+        if (img1.getWidth() != img2.getWidth() || img1.getHeight() != img2.getHeight()) {
+            // Масштабируем, если размеры разные
+            img2 = resizeImage(img2, img1.getWidth(), img1.getHeight());
+        }
+
+        int width = img1.getWidth();
+        int height = img1.getHeight();
+
+        double totalDifference = 0;
+        int pixelsCompared = 0;
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                Color c1 = new Color(img1.getRGB(x, y));
+                Color c2 = new Color(img2.getRGB(x, y));
+
+                double diff = Math.abs(c1.getRed() - c2.getRed()) / 255.0 +
+                        Math.abs(c1.getGreen() - c2.getGreen()) / 255.0 +
+                        Math.abs(c1.getBlue() - c2.getBlue()) / 255.0;
+
+                totalDifference += diff / 3.0; // Нормализуем
+                pixelsCompared++;
             }
         }
 
-        // Вычисляем среднее
-        double sum = 0;
-        for (double v : values) {
-            sum += v;
-        }
-        double mean = sum / values.size();
-
-        // Вычисляем дисперсию
-        double variance = 0;
-        for (double v : values) {
-            variance += Math.pow(v - mean, 2);
-        }
-        variance /= values.size();
-
-        return Math.sqrt(variance);
+        double averageDifference = totalDifference / pixelsCompared;
+        return 1.0 - averageDifference; // Чем меньше разница, тем выше схожесть
     }
 
-    private int getAverageBrightness(BufferedImage image) {
-        int w = image.getWidth();
-        int h = image.getHeight();
-        long total = 0;
-        int pixels = 0;
-
-        for (int x = 0; x < w; x += 2) {
-            for (int y = 0; y < h; y += 2) {
-                int rgb = image.getRGB(x, y);
-                int r = (rgb >> 16) & 0xFF;
-                int g = (rgb >> 8) & 0xFF;
-                int b = rgb & 0xFF;
-                total += (r + g + b) / 3;
-                pixels++;
-            }
-        }
-
-        return (int)(total / pixels);
-    }
-
-    private boolean isRed(BufferedImage image) {
-        int w = image.getWidth();
-        int h = image.getHeight();
-        int redPixels = 0;
-        int total = 0;
-
-        for (int x = 0; x < w; x += 2) {
-            for (int y = 0; y < h; y += 2) {
-                int rgb = image.getRGB(x, y);
-                int r = (rgb >> 16) & 0xFF;
-                int g = (rgb >> 8) & 0xFF;
-                int b = rgb & 0xFF;
-
-                if (r > 150 && g < 100 && b < 100) {
-                    redPixels++;
-                }
-                total++;
-            }
-        }
-
-        return redPixels > total / 3;
-    }
-
-    private double compareImages(BufferedImage img1, BufferedImage img2) {
-        BufferedImage scaled1 = scaleImage(img1, 20, 20);
-        BufferedImage scaled2 = scaleImage(img2, 20, 20);
-
-        double totalDiff = 0;
-        int pixels = 0;
-
-        for (int x = 0; x < 20; x++) {
-            for (int y = 0; y < 20; y++) {
-                int rgb1 = scaled1.getRGB(x, y);
-                int rgb2 = scaled2.getRGB(x, y);
-
-                int gray1 = getGrayValue(rgb1);
-                int gray2 = getGrayValue(rgb2);
-
-                double weight = 1.0;
-                double dx = (x - 10) / 10.0;
-                double dy = (y - 10) / 10.0;
-                double dist = Math.sqrt(dx*dx + dy*dy);
-
-                if (dist < 0.7) {
-                    weight = 2.0; // центр в 2 раза важнее
-                } else if (dist > 1.2) {
-                    weight = 0.5; // края менее важны
-                }
-
-                totalDiff += Math.abs(gray1 - gray2) * weight;
-                pixels += weight;
-            }
-        }
-
-        return totalDiff / pixels;
-    }
-
-    private BufferedImage scaleImage(BufferedImage original, int width, int height) {
-        BufferedImage scaled = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = scaled.createGraphics();
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        g.drawImage(original, 0, 0, width, height, null);
+    /**
+     * Изменение размера изображения
+     */
+    private BufferedImage resizeImage(BufferedImage original, int targetWidth, int targetHeight) {
+        BufferedImage resized = new BufferedImage(targetWidth, targetHeight, original.getType());
+        java.awt.Graphics2D g = resized.createGraphics();
+        g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+                java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.drawImage(original, 0, 0, targetWidth, targetHeight, null);
         g.dispose();
-        return scaled;
+        return resized;
     }
 
-    private int getGrayValue(int rgb) {
-        int r = (rgb >> 16) & 0xFF;
-        int g = (rgb >> 8) & 0xFF;
-        int b = rgb & 0xFF;
-        return (int)(0.299 * r + 0.587 * g + 0.114 * b);
-    }
+    /**
+     * Распознавание по цвету (запасной вариант)
+     */
+    private RecognitionResult recognizeByColor(BufferedImage image) {
+        // Анализируем средний цвет
+        int width = image.getWidth();
+        int height = image.getHeight();
 
-    public int[][] recognizeBoard(BufferedImage fullImage, int rows, int cols,
-                                  int offsetX, int offsetY, int cellSize) {
-        int[][] board = new int[rows][cols];
+        long totalR = 0, totalG = 0, totalB = 0;
 
-        System.out.println("\n🔍 АНАЛИЗ ПОЛЯ:");
-        System.out.println("   Размер скриншота: " + fullImage.getWidth() + "x" + fullImage.getHeight());
-        System.out.println("──────────────────────────");
-
-        for (int row = 0; row < rows; row++) {
-            for (int col = 0; col < cols; col++) {
-                try {
-                    int x = col * cellSize;
-                    int y = row * cellSize;
-
-                    if (x + cellSize <= fullImage.getWidth() &&
-                            y + cellSize <= fullImage.getHeight()) {
-
-                        BufferedImage cellImage = fullImage.getSubimage(x, y, cellSize, cellSize);
-                        int value = recognizeCell(cellImage, row, col);
-                        board[row][col] = value;
-                    } else {
-                        board[row][col] = UNKNOWN;
-                    }
-                } catch (Exception e) {
-                    board[row][col] = UNKNOWN;
-                }
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                Color color = new Color(image.getRGB(x, y));
+                totalR += color.getRed();
+                totalG += color.getGreen();
+                totalB += color.getBlue();
             }
         }
 
-        printBoard(board);
-        return board;
-    }
+        int avgR = (int) (totalR / (width * height));
+        int avgG = (int) (totalG / (width * height));
+        int avgB = (int) (totalB / (width * height));
 
-    private void printBoard(int[][] board) {
-        System.out.println("\n📋 РАСПОЗНАННОЕ ПОЛЕ:");
-        for (int i = 0; i < board.length; i++) {
-            System.out.print("   ");
-            for (int j = 0; j < board[i].length; j++) {
-                String val;
-                switch (board[i][j]) {
-                    case MINE: val = "💣"; break;
-                    case FLAG: val = "🚩"; break;
-                    case UNKNOWN: val = "❓"; break;
-                    case EMPTY: val = "·"; break;
-                    default: val = String.valueOf(board[i][j]);
-                }
-                System.out.print(val + " ");
+        // Типичные цвета для разных состояний
+        if (isCloseToGray(avgR, avgG, avgB)) {
+            if (avgR > 200) {
+                return new RecognitionResult(CellState.EMPTY, 0.6, "color(bright)");
+            } else if (avgR < 100) {
+                return new RecognitionResult(CellState.CLOSED, 0.6, "color(dark)");
             }
-            System.out.println();
         }
-        System.out.println();
+
+        return new RecognitionResult(CellState.UNKNOWN, 0.3, "color(fallback)");
     }
 
-    public void setDebugMode(boolean debug) {
-        this.debugMode = debug;
+    /**
+     * Проверка, является ли цвет серым
+     */
+    private boolean isCloseToGray(int r, int g, int b) {
+        int maxDiff = Math.max(Math.abs(r - g), Math.max(Math.abs(g - b), Math.abs(r - b)));
+        return maxDiff < 30;
+    }
+
+    /**
+     * Установка порога схожести
+     */
+    public void setSimilarityThreshold(double threshold) {
+        this.similarityThreshold = threshold;
+    }
+
+    /**
+     * Очистка кэша
+     */
+    public void clearCache() {
+        templateCache.clear();
     }
 }

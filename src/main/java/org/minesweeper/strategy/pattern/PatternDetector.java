@@ -1,20 +1,60 @@
 package org.minesweeper.strategy.pattern;
 
-import org.minesweeper.core.GameState;
+import org.minesweeper.core.Cell;
 import org.minesweeper.core.Move;
+import org.minesweeper.utils.Logger;
+
+import java.util.*;
 
 /**
- * Интерфейс для детекторов паттернов
+ * Детектор и обработчик игровых паттернов.
  */
-public interface PatternDetector {
-    /**
-     * Проверить, есть ли паттерн в данной позиции
-     * @return ход, соответствующий паттерну, или null
-     */
-    Move detectPattern(GameState state, int row, int col);
+public class PatternDetector {
+    private List<Pattern> patterns;
+    private Logger logger;
+
+    public PatternDetector() {
+        this.logger = Logger.getInstance();
+        this.patterns = new ArrayList<>();
+
+        // Регистрируем все известные паттерны
+        registerPattern(new OneTwoOnePattern());
+        registerPattern(new OneTwoTwoOnePattern());
+        registerPattern(new TwoTwoPattern());
+        registerPattern(new OneOnePattern());
+        registerPattern(new EdgePattern());
+
+        logger.info("PatternDetector инициализирован с " + patterns.size() + " паттернами");
+    }
 
     /**
-     * @return название паттерна
+     * Поиск любого известного паттерна на доске
      */
-    String getPatternName();
+    public Move detectPattern(Cell[][] board) {
+        for (Pattern pattern : patterns) {
+            Move move = pattern.detect(board);
+            if (move != null) {
+                logger.debug("Найден паттерн: " + pattern.getName());
+                return move;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Добавление нового паттерна
+     */
+    public void registerPattern(Pattern pattern) {
+        if (pattern != null) {
+            patterns.add(pattern);
+            logger.debug("Зарегистрирован паттерн: " + pattern.getName());
+        }
+    }
+
+    /**
+     * Получение списка всех паттернов
+     */
+    public List<Pattern> getPatterns() {
+        return Collections.unmodifiableList(patterns);
+    }
 }

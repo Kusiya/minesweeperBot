@@ -1,38 +1,49 @@
-package org.minesweeper.strategy;
+package org.minesweeper.strategy.pattern;
 
 import org.minesweeper.core.Cell;
 import org.minesweeper.core.Move;
-import org.minesweeper.utils.Logger;
 
 import java.util.*;
 
 /**
- * Базовая стратегия с простыми правилами.
- * Реализует гарантированные ходы на основе цифр.
+ * Паттерны для работы с границами доски.
  */
-public class BasicStrategy implements Strategy {
-    private Logger logger;
-
-    public BasicStrategy() {
-        this.logger = Logger.getInstance();
-    }
+public class EdgePattern implements Pattern {
 
     @Override
-    public Move analyze(Cell[][] board, int totalMines) {
-        logger.debug("BasicStrategy: поиск гарантированных ходов");
-
+    public Move detect(Cell[][] board) {
         int rows = board.length;
         int cols = board[0].length;
 
-        // Поиск гарантированных ходов
-        for (int i = 0; i < rows; i++) {
-            for (int j = 0; j < cols; j++) {
-                if (board[i][j].isRevealed() && board[i][j].getAdjacentMines() > 0) {
-                    Move move = analyzeCell(board, i, j);
-                    if (move != null) {
-                        return move;
-                    }
-                }
+        // Проверка верхней границы
+        for (int j = 0; j < cols; j++) {
+            if (isRevealedCell(board, 0, j)) {
+                Move move = analyzeEdgeCell(board, 0, j);
+                if (move != null) return move;
+            }
+        }
+
+        // Проверка нижней границы
+        for (int j = 0; j < cols; j++) {
+            if (isRevealedCell(board, rows - 1, j)) {
+                Move move = analyzeEdgeCell(board, rows - 1, j);
+                if (move != null) return move;
+            }
+        }
+
+        // Проверка левой границы
+        for (int i = 1; i < rows - 1; i++) {
+            if (isRevealedCell(board, i, 0)) {
+                Move move = analyzeEdgeCell(board, i, 0);
+                if (move != null) return move;
+            }
+        }
+
+        // Проверка правой границы
+        for (int i = 1; i < rows - 1; i++) {
+            if (isRevealedCell(board, i, cols - 1)) {
+                Move move = analyzeEdgeCell(board, i, cols - 1);
+                if (move != null) return move;
             }
         }
 
@@ -40,35 +51,29 @@ public class BasicStrategy implements Strategy {
     }
 
     /**
-     * Анализ конкретной открытой клетки
+     * Анализ клетки на границе
      */
-    private Move analyzeCell(Cell[][] board, int row, int col) {
+    private Move analyzeEdgeCell(Cell[][] board, int row, int col) {
         Set<Cell> unrevealedNeighbors = getUnrevealedNeighbors(board, row, col);
         Set<Cell> flaggedNeighbors = getFlaggedNeighbors(board, row, col);
 
         int minesNeeded = board[row][col].getAdjacentMines() - flaggedNeighbors.size();
 
-        // Случай 1: Все неоткрытые соседи - мины
+        // На границе некоторые соседи отсутствуют, что упрощает анализ
         if (unrevealedNeighbors.size() == minesNeeded && minesNeeded > 0) {
             for (Cell cell : unrevealedNeighbors) {
                 if (!cell.isFlagged()) {
-                    logger.debug("BasicStrategy: найдены гарантированные мины вокруг (" +
-                            row + ", " + col + ")");
-                    return new Move(cell.getRow(), cell.getCol(), true, 1.0, getName(),
-                            "Все неоткрытые соседи - мины (цифра " + board[row][col].getAdjacentMines() +
-                                    ", отмечено " + flaggedNeighbors.size() + ")");
+                    return new Move(cell.getRow(), cell.getCol(), true, 0.95, getName(),
+                            "Граничный случай: все доступные соседи - мины");
                 }
             }
         }
 
-        // Случай 2: Все мины уже отмечены, остальные можно открыть
         if (minesNeeded == 0 && !unrevealedNeighbors.isEmpty()) {
             for (Cell cell : unrevealedNeighbors) {
                 if (!cell.isFlagged()) {
-                    logger.debug("BasicStrategy: найдены безопасные клетки вокруг (" +
-                            row + ", " + col + ")");
-                    return new Move(cell.getRow(), cell.getCol(), false, 1.0, getName(),
-                            "Все мины вокруг уже отмечены");
+                    return new Move(cell.getRow(), cell.getCol(), false, 0.95, getName(),
+                            "Граничный случай: все мины отмечены, остальные безопасны");
                 }
             }
         }
@@ -77,7 +82,7 @@ public class BasicStrategy implements Strategy {
     }
 
     /**
-     * Получение неоткрытых соседей
+     * Получение неоткрытых соседей с учетом границ
      */
     private Set<Cell> getUnrevealedNeighbors(Cell[][] board, int row, int col) {
         Set<Cell> neighbors = new HashSet<>();
@@ -128,18 +133,20 @@ public class BasicStrategy implements Strategy {
         return neighbors;
     }
 
-    @Override
-    public String getName() {
-        return "Basic Strategy";
+    /**
+     * Проверка, открыта ли клетка
+     */
+    private boolean isRevealedCell(Cell[][] board, int row, int col) {
+        return board[row][col].isRevealed();
     }
 
     @Override
-    public int getPriority() {
-        return 100; // Высокий приоритет - применяется первой
+    public String getName() {
+        return "Edge Pattern";
     }
 
     @Override
     public String getDescription() {
-        return "Ищет гарантированные ходы на основе цифр на открытых клетках";
+        return "Специализированные правила для клеток на границе доски";
     }
 }

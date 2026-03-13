@@ -1,83 +1,240 @@
 package org.minesweeper.utils;
 
+import org.minesweeper.vision.ScreenCapture;
+
 import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.IOException;
+import java.util.Scanner;
 
 /**
- * Утилита для сбора шаблонов клеток из реальной игры
+ * Утилита для сбора и сохранения шаблонов клеток.
+ * Помогает создать набор шаблонов для распознавания.
  */
 public class TemplateCollector {
+    private ScreenCapture screenCapture;
+    private String outputDirectory;
+    private Logger logger;
+    private Scanner scanner;
 
-    public static void main(String[] args) throws Exception {
-        Robot robot = new Robot();
+    public TemplateCollector(String outputDirectory) throws AWTException {
+        this.screenCapture = new ScreenCapture();
+        this.outputDirectory = outputDirectory;
+        this.logger = Logger.getInstance();
+        this.scanner = new Scanner(System.in);
 
-        System.out.println("🎮 СБОРЩИК ШАБЛОНОВ ДЛЯ САПЁРА");
-        System.out.println("=================================");
-        System.out.println("1. Откройте игру в Сапёра");
-        System.out.println("2. Убедитесь, что видно разные клетки:");
-        System.out.println("   - Закрытые клетки");
-        System.out.println("   - Пустые открытые");
-        System.out.println("   - Цифры 1-8");
-        System.out.println("   - Флаги");
-        System.out.println("   - Мины (после проигрыша)");
-        System.out.println("3. Нажмите Enter для начала сбора...");
-        System.in.read();
+        // Создаем директорию, если её нет
+        new File(outputDirectory).mkdirs();
 
-        // Создаем папку для шаблонов
-        File templatesDir = new File("templates");
-        if (!templatesDir.exists()) {
-            templatesDir.mkdirs();
-        }
-
-        // Сбор шаблонов
-        collectTemplate(robot, "closed", "закрытая клетка");
-        collectTemplate(robot, "0", "пустая открытая клетка");
-        collectTemplate(robot, "1", "цифра 1");
-        collectTemplate(robot, "2", "цифра 2");
-        collectTemplate(robot, "3", "цифра 3");
-        collectTemplate(robot, "4", "цифра 4");
-        collectTemplate(robot, "5", "цифра 5");
-        collectTemplate(robot, "6", "цифра 6");
-        collectTemplate(robot, "7", "цифра 7");
-        collectTemplate(robot, "8", "цифра 8");
-        collectTemplate(robot, "flag", "флаг");
-        collectTemplate(robot, "mine", "мина");
-
-        System.out.println("\n✅ Сбор шаблонов завершен!");
-        System.out.println("Шаблоны сохранены в папке: " + templatesDir.getAbsolutePath());
+        logger.info("TemplateCollector инициализирован, директория: " + outputDirectory);
     }
 
-    private static void collectTemplate(Robot robot, String name, String description) throws Exception {
-        System.out.println("\n📸 Сбор шаблона: " + name + " (" + description + ")");
-        System.out.println("Наведите мышь на центр такой клетки и нажмите Enter...");
-        System.in.read();
+    /**
+     * Захват и сохранение шаблона клетки
+     */
+    public void captureTemplate(String name, int x, int y, int width, int height)
+            throws Exception {
 
-        // Получаем позицию мыши
-        Point mousePos = MouseInfo.getPointerInfo().getLocation();
-        System.out.println("Позиция: (" + mousePos.x + ", " + mousePos.y + ")");
+        logger.info("Захват шаблона '" + name + "' в позиции (" + x + ", " + y + ")");
 
-        // Захватываем область вокруг курсора (40x40 пикселей)
-        Rectangle area = new Rectangle(mousePos.x - 20, mousePos.y - 20, 40, 40);
-        BufferedImage screenshot = robot.createScreenCapture(area);
+        BufferedImage screen = screenCapture.captureScreen();
+        BufferedImage template = screen.getSubimage(x, y, width, height);
 
-        // Сохраняем в разных размерах
-        String filename = "templates/" + name + ".png";
-        ImageIO.write(screenshot, "png", new File(filename));
-        System.out.println("  ✓ Сохранен: " + filename);
+        File outputFile = new File(outputDirectory, name + ".png");
+        ImageIO.write(template, "png", outputFile);
 
-        // Создаем уменьшенную версию для сравнения
-        BufferedImage small = new BufferedImage(20, 20, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = small.createGraphics();
-        g.drawImage(screenshot, 0, 0, 20, 20, null);
-        g.dispose();
+        logger.info("Шаблон сохранен: " + outputFile.getAbsolutePath());
+        System.out.println("✓ Шаблон сохранен: " + name);
+    }
 
-        String smallFilename = "templates/" + name + "_small.png";
-        ImageIO.write(small, "png", new File(smallFilename));
-        System.out.println("  ✓ Сохранен уменьшенный: " + smallFilename);
+    /**
+     * Интерактивный сбор шаблонов
+     */
+    public void interactiveCollect() throws Exception {
+        System.out.println("\n=== ИНТЕРАКТИВНЫЙ СБОР ШАБЛОНОВ ===");
+        System.out.println("Наведите мышь на нужную клетку и нажмите Enter");
 
-        // Небольшая пауза
-        Thread.sleep(500);
+        while (true) {
+            System.out.println("\n1. Собрать шаблон цифры");
+            System.out.println("2. Собрать шаблон мины");
+            System.out.println("3. Собрать шаблон флага");
+            System.out.println("4. Собрать шаблон пустой клетки");
+            System.out.println("5. Собрать шаблон закрытой клетки");
+            System.out.println("6. Выход");
+            System.out.print("Выберите тип: ");
+
+            int choice = Integer.parseInt(scanner.nextLine());
+            if (choice == 6) break;
+
+            System.out.print("Введите имя шаблона (например, digit_1_1): ");
+            String name = scanner.nextLine();
+
+            System.out.println("Наведите мышь на левый верхний угол клетки...");
+            waitForEnter();
+            Point topLeft = getMousePosition();
+
+            System.out.println("Наведите мышь на правый нижний угол клетки...");
+            waitForEnter();
+            Point bottomRight = getMousePosition();
+
+            int width = bottomRight.x - topLeft.x;
+            int height = bottomRight.y - topLeft.y;
+
+            captureTemplate(name, topLeft.x, topLeft.y, width, height);
+        }
+    }
+
+    /**
+     * Автоматический сбор всех шаблонов с доски
+     */
+    public void collectAllTemplates(int rows, int cols, int cellSize, Point boardOffset)
+            throws Exception {
+
+        System.out.println("\n=== АВТОМАТИЧЕСКИЙ СБОР ШАБЛОНОВ ===");
+        System.out.println("Будет выполнено распознавание всех клеток");
+        System.out.println("Для каждой клетки укажите её тип");
+
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                // Вычисляем координаты клетки
+                int x = boardOffset.x + j * cellSize;
+                int y = boardOffset.y + i * cellSize;
+
+                // Захватываем изображение клетки
+                BufferedImage cellImage = captureCell(i, j, cellSize, boardOffset);
+
+                // Сохраняем временный файл для просмотра
+                File tempFile = new File(outputDirectory, "temp.png");
+                ImageIO.write(cellImage, "png", tempFile);
+
+                System.out.println("\nКлетка (" + i + ", " + j + ")");
+                System.out.println("Типы: 0-8, mine, flag, empty, closed");
+                System.out.print("Введите тип: ");
+
+                String type = scanner.nextLine().trim().toLowerCase();
+
+                if (!type.isEmpty()) {
+                    String filename = type + "_" + i + "_" + j + ".png";
+                    File outputFile = new File(outputDirectory, filename);
+                    ImageIO.write(cellImage, "png", outputFile);
+                    System.out.println("Сохранено: " + filename);
+                }
+
+                // Удаляем временный файл
+                tempFile.delete();
+            }
+        }
+
+        System.out.println("\nСбор шаблонов завершен!");
+    }
+
+    /**
+     * Захват изображения конкретной клетки
+     */
+    private BufferedImage captureCell(int row, int col, int cellSize, Point boardOffset)
+            throws Exception {
+
+        int x = boardOffset.x + col * cellSize;
+        int y = boardOffset.y + row * cellSize;
+
+        BufferedImage screen = screenCapture.captureScreen();
+        return screen.getSubimage(x, y, cellSize, cellSize);
+    }
+
+    /**
+     * Получение текущей позиции мыши
+     */
+    private Point getMousePosition() {
+        return MouseInfo.getPointerInfo().getLocation();
+    }
+
+    /**
+     * Ожидание нажатия Enter
+     */
+    private void waitForEnter() {
+        System.out.println("Нажмите Enter для продолжения...");
+        scanner.nextLine();
+    }
+
+    /**
+     * Создание структуры директорий для шаблонов
+     */
+    public void createTemplateStructure() {
+        String[] themes = {"default", "dark", "classic"};
+        String[] types = {"digits", "mines", "flags", "empty", "closed"};
+
+        for (String theme : themes) {
+            File themeDir = new File(outputDirectory, theme);
+            themeDir.mkdirs();
+
+            for (String type : types) {
+                File typeDir = new File(themeDir, type);
+                typeDir.mkdirs();
+            }
+        }
+
+        logger.info("Структура директорий для шаблонов создана");
+    }
+
+    /**
+     * Пакетный захват всех цифр
+     */
+    public void captureAllDigits(int startX, int startY, int cellSize, int spacing)
+            throws Exception {
+
+        System.out.println("\n=== ЗАХВАТ ЦИФР ===");
+
+        for (int digit = 0; digit <= 8; digit++) {
+            int x = startX + digit * (cellSize + spacing);
+
+            System.out.println("Захват цифры " + digit);
+            System.out.println("Наведите мышь на клетку с цифрой " + digit);
+            waitForEnter();
+
+            BufferedImage digitImage = screenCapture.captureScreen()
+                    .getSubimage(x, startY, cellSize, cellSize);
+
+            String filename = "digit_" + digit + ".png";
+            File outputFile = new File(outputDirectory, filename);
+            ImageIO.write(digitImage, "png", outputFile);
+
+            System.out.println("✓ Сохранено: " + filename);
+        }
+    }
+
+    /**
+     * Валидация шаблонов
+     */
+    public void validateTemplates() {
+        System.out.println("\n=== ВАЛИДАЦИЯ ШАБЛОНОВ ===");
+
+        File dir = new File(outputDirectory);
+        File[] files = dir.listFiles((d, name) -> name.endsWith(".png"));
+
+        if (files == null || files.length == 0) {
+            System.out.println("Шаблоны не найдены");
+            return;
+        }
+
+        System.out.println("Найдено " + files.length + " шаблонов:");
+
+        for (File file : files) {
+            try {
+                BufferedImage img = ImageIO.read(file);
+                System.out.printf("  %s: %dx%d\n", file.getName(),
+                        img.getWidth(), img.getHeight());
+            } catch (IOException e) {
+                System.out.println("  Ошибка чтения: " + file.getName());
+            }
+        }
+    }
+
+    /**
+     * Закрытие ресурсов
+     */
+    public void close() {
+        scanner.close();
     }
 }

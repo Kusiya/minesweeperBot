@@ -1,120 +1,276 @@
 package org.minesweeper.strategy;
 
 import org.minesweeper.core.Cell;
-import org.minesweeper.core.GameState;
 import org.minesweeper.core.Move;
-import org.minesweeper.strategy.pattern.PatternDetector;
-import org.minesweeper.strategy.pattern.OneTwoOnePattern;
-import java.util.ArrayList;
-import java.util.List;
+import org.minesweeper.utils.Logger;
+
+import java.util.*;
 
 /**
- * Продвинутая стратегия, использующая паттерны и вероятностный анализ
+ * Продвинутая стратегия с вероятностным анализом.
  */
 public class AdvancedStrategy implements Strategy {
-    private final BasicStrategy basicStrategy;
-    private final List<PatternDetector> patternDetectors;
+    private Logger logger;
+    private Map<String, Double> probabilityCache;
 
     public AdvancedStrategy() {
-        this.basicStrategy = new BasicStrategy();
-        this.patternDetectors = new ArrayList<>();
-
-        // Регистрируем все паттерны
-        registerPatterns();
-    }
-
-    private void registerPatterns() {
-        patternDetectors.add(new OneTwoOnePattern());
-        // Здесь можно добавить другие паттерны
-        // patternDetectors.add(new OneTwoTwoOnePattern());
-        // patternDetectors.add(new EdgePattern());
+        this.logger = Logger.getInstance();
+        this.probabilityCache = new HashMap<>();
     }
 
     @Override
-    public String getName() {
-        return "Продвинутая стратегия (паттерны + вероятность)";
-    }
+    public Move analyze(Cell[][] board, int totalMines) {
+        logger.debug("AdvancedStrategy: вероятностный анализ");
 
-    @Override
-    public Move nextMove(GameState state) {
-        // 1. Сначала пробуем базовые правила
-        Move basicMove = basicStrategy.nextMove(state);
-        if (basicMove != null) {
-            return basicMove;
-        }
+        probabilityCache.clear();
 
-        // 2. Ищем паттерны
-        Move patternMove = findPatternMove(state);
-        if (patternMove != null) {
-            return patternMove;
-        }
+        int rows = board.length;
+        int cols = board[0].length;
 
-        // 3. Если ничего не нашли - вероятностный анализ
-        return probabilisticMove(state);
-    }
-
-    /**
-     * Поиск хода по паттернам
-     */
-    private Move findPatternMove(GameState state) {
-        for (int i = 0; i < state.getRows(); i++) {
-            for (int j = 0; j < state.getCols(); j++) {
-                for (PatternDetector detector : patternDetectors) {
-                    Move move = detector.detectPattern(state, i, j);
-                    if (move != null) {
-                        return move;
-                    }
+        // Собираем все неоткрытые клетки
+        List<Cell> unrevealedCells = new ArrayList<>();
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                if (!board[i][j].isRevealed() && !board[i][j].isFlagged()) {
+                    unrevealedCells.add(board[i][j]);
                 }
             }
         }
+
+        if (unrevealedCells.isEmpty()) {
+            return null;
+        }
+
+        // Вычисляем вероятности
+        Map<Cell, Double> probabilities = calculateProbabilities(board, unrevealedCells, totalMines);
+
+        // Находим клетку с наименьшей вероятностью мины
+        Cell safest = findSafestCell(probabilities);
+
+        if (safest != null) {
+            double probability = probabilities.get(safest);
+            logger.debug(String.format("AdvancedStrategy: safest клетка (%d,%d) с вероятностью %.2f",
+                    safest.getRow(), safest.getCol(), probability));
+
+            // Если вероятность очень низкая, открываем клетку
+            if (probability < 0.3) {
+                return new Move(safest.getRow(), safest.getCol(), false, 1.0 - probability, getName(),
+                        String.format("Низкая вероятность мины (%.2f%%)", probability * 100));
+            }
+
+            // Если вероятность очень высокая, ставим флаг
+            if (probability > 0.7) {
+                return new Move(safest.getRow(), safest.getCol(), true, probability, getName(),
+                        String.format("Высокая вероятность мины (%.2f%%)", probability * 100));
+            }
+        }
+
         return null;
     }
 
     /**
-     * Вероятностный анализ - выбираем клетку с наименьшей вероятностью мины
+     * Расчет вероятностей для всех неоткрытых клеток
      */
-    private Move probabilisticMove(GameState state) {
-        List<Move> candidates = new ArrayList<>();
+    private Map<Cell, Double> calculateProbabilities(Cell[][] board,
+                                                     List<Cell> unrevealedCells, int totalMines) {
+        Map<Cell, Double> probabilities = new HashMap<>();
 
-        for (int i = 0; i < state.getRows(); i++) {
-            for (int j = 0; j < state.getCols(); j++) {
-                Cell cell = state.getCell(i, j);
-                if (!cell.isOpenable()) continue;
+        int flaggedCount = countFlagged(board);
+        int remainingMines = totalMines - flaggedCount;
 
-                double risk = estimateRisk(state, i, j);
-                candidates.add(new Move(i, j, false, risk,
-                        String.format("Вероятностный анализ (риск %.1f%%)", risk * 100)));
-            }
+        for (Cell cell : unrevealedCells) {
+            double probability = calculateCellProbability(board, cell, remainingMines);
+            probabilities.put(cell, probability);
         }
 
-        // Сортируем по риску (от меньшего к большему)
-        candidates.sort((m1, m2) -> Double.compare(m1.getRisk(), m2.getRisk()));
-
-        return candidates.isEmpty() ? null : candidates.get(0);
+        return probabilities;
     }
 
     /**
-     * Оценить риск для клетки
+     * Расчет вероятности для конкретной клетки
      */
-    private double estimateRisk(GameState state, int row, int col) {
-        List<Cell> neighbors = state.getNeighbors(row, col);
-        double totalRisk = 0;
-        int validNeighbors = 0;
+    private double calculateCellProbability(Cell[][] board, Cell cell, int remainingMines) {
+        List<Cell> adjacentRevealed = getAdjacentRevealedCells(board, cell);
 
-        for (Cell neighbor : neighbors) {
-            if (neighbor.isRevealed() && neighbor.getAdjacentMines() > 0) {
-                int number = neighbor.getAdjacentMines();
-                int flags = state.countFlagsAround(neighbor.getRow(), neighbor.getCol());
-                int unknown = state.countUnknownAround(neighbor.getRow(), neighbor.getCol());
+        if (adjacentRevealed.isEmpty()) {
+            // Нет информации от соседей - используем глобальную вероятность
+            int unrevealedCount = countUnrevealed(board);
+            return (double) remainingMines / unrevealedCount;
+        }
 
-                if (unknown > 0) {
-                    double localRisk = (number - flags) / (double) unknown;
-                    totalRisk += localRisk;
-                    validNeighbors++;
+        double totalProbability = 0;
+        int contributingNeighbors = 0;
+
+        for (Cell revealed : adjacentRevealed) {
+            Set<Cell> unrevealedNeighbors = getUnrevealedNeighbors(board, revealed);
+            Set<Cell> flaggedNeighbors = getFlaggedNeighbors(board, revealed);
+
+            if (unrevealedNeighbors.contains(cell)) {
+                int minesNeeded = revealed.getAdjacentMines() - flaggedNeighbors.size();
+
+                if (minesNeeded > 0) {
+                    // Равномерно распределяем вероятность между неоткрытыми соседями
+                    double neighborProbability = (double) minesNeeded / unrevealedNeighbors.size();
+                    totalProbability += neighborProbability;
+                    contributingNeighbors++;
+                } else if (minesNeeded == 0) {
+                    // Если вокруг клетки не должно быть мин, то эта клетка безопасна
+                    return 0.0;
                 }
             }
         }
 
-        return validNeighbors > 0 ? totalRisk / validNeighbors : 0.5;
+        if (contributingNeighbors > 0) {
+            return totalProbability / contributingNeighbors;
+        }
+
+        // Если нет информации, используем глобальную вероятность
+        int unrevealedCount = countUnrevealed(board);
+        return (double) remainingMines / unrevealedCount;
+    }
+
+    /**
+     * Поиск safest клетки (с наименьшей вероятностью мины)
+     */
+    private Cell findSafestCell(Map<Cell, Double> probabilities) {
+        Cell safest = null;
+        double minProbability = 1.0;
+
+        for (Map.Entry<Cell, Double> entry : probabilities.entrySet()) {
+            if (entry.getValue() < minProbability) {
+                minProbability = entry.getValue();
+                safest = entry.getKey();
+            }
+        }
+
+        return safest;
+    }
+
+    /**
+     * Подсчет количества флагов
+     */
+    private int countFlagged(Cell[][] board) {
+        int count = 0;
+        for (Cell[] row : board) {
+            for (Cell cell : row) {
+                if (cell.isFlagged()) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Подсчет количества неоткрытых клеток
+     */
+    private int countUnrevealed(Cell[][] board) {
+        int count = 0;
+        for (Cell[] row : board) {
+            for (Cell cell : row) {
+                if (!cell.isRevealed()) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Получение открытых соседей клетки
+     */
+    private List<Cell> getAdjacentRevealedCells(Cell[][] board, Cell cell) {
+        List<Cell> revealed = new ArrayList<>();
+        int rows = board.length;
+        int cols = board[0].length;
+
+        for (int i = -1; i <= 1; i++) {
+            for (int j = -1; j <= 1; j++) {
+                if (i == 0 && j == 0) continue;
+
+                int newRow = cell.getRow() + i;
+                int newCol = cell.getCol() + j;
+
+                if (newRow >= 0 && newRow < rows && newCol >= 0 && newCol < cols) {
+                    Cell neighbor = board[newRow][newCol];
+                    if (neighbor.isRevealed()) {
+                        revealed.add(neighbor);
+                    }
+                }
+            }
+        }
+        return revealed;
+    }
+
+    /**
+     * Получение неоткрытых соседей клетки
+     */
+    private Set<Cell> getUnrevealedNeighbors(Cell[][] board, Cell cell) {
+        Set<Cell> neighbors = new HashSet<>();
+        int rows = board.length;
+        int cols = board[0].length;
+
+        for (int i = -1; i <= 1; i++) {
+            for (int j = -1; j <= 1; j++) {
+                if (i == 0 && j == 0) continue;
+
+                int newRow = cell.getRow() + i;
+                int newCol = cell.getCol() + j;
+
+                if (newRow >= 0 && newRow < rows && newCol >= 0 && newCol < cols) {
+                    Cell neighbor = board[newRow][newCol];
+                    if (!neighbor.isRevealed()) {
+                        neighbors.add(neighbor);
+                    }
+                }
+            }
+        }
+        return neighbors;
+    }
+
+    /**
+     * Получение соседей с флагами
+     */
+    private Set<Cell> getFlaggedNeighbors(Cell[][] board, Cell cell) {
+        Set<Cell> neighbors = new HashSet<>();
+        int rows = board.length;
+        int cols = board[0].length;
+
+        for (int i = -1; i <= 1; i++) {
+            for (int j = -1; j <= 1; j++) {
+                if (i == 0 && j == 0) continue;
+
+                int newRow = cell.getRow() + i;
+                int newCol = cell.getCol() + j;
+
+                if (newRow >= 0 && newRow < rows && newCol >= 0 && newCol < cols) {
+                    Cell neighbor = board[newRow][newCol];
+                    if (neighbor.isFlagged()) {
+                        neighbors.add(neighbor);
+                    }
+                }
+            }
+        }
+        return neighbors;
+    }
+
+    @Override
+    public String getName() {
+        return "Advanced Strategy";
+    }
+
+    @Override
+    public int getPriority() {
+        return 50; // Средний приоритет
+    }
+
+    @Override
+    public String getDescription() {
+        return "Использует вероятностный анализ для оценки риска каждой клетки";
+    }
+
+    @Override
+    public void reset() {
+        probabilityCache.clear();
     }
 }
