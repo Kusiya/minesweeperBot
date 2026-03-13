@@ -3,77 +3,86 @@ package org.minesweeper.utils;
 import java.io.*;
 import java.util.Properties;
 
-/**
- * Загрузка и сохранение настроек
- */
 public class Config {
-    private final Properties properties;
-    private final String configFile;
+    private static Config instance;
+    private Properties props;
+    private String configFile = "minesweeper.properties";
 
-    public Config(String configFile) {
-        this.configFile = configFile;
-        this.properties = new Properties();
+    private Config() {
+        props = new Properties();
         load();
     }
 
-    /**
-     * Загрузить настройки из файла
-     */
+    public static Config getInstance() {
+        if (instance == null) {
+            instance = new Config();
+        }
+        return instance;
+    }
+
     private void load() {
         try (InputStream input = new FileInputStream(configFile)) {
-            properties.load(input);
-            Logger.info("Конфигурация загружена из " + configFile);
+            props.load(input);
+            System.out.println("✅ Конфигурация загружена из " + configFile);
         } catch (IOException e) {
-            Logger.warn("Не удалось загрузить конфигурацию: " + e.getMessage());
+            System.out.println("⚠️ Файл конфигурации не найден, создаем новый");
             setDefaults();
         }
     }
 
-    /**
-     * Сохранить настройки в файл
-     */
     public void save() {
         try (OutputStream output = new FileOutputStream(configFile)) {
-            properties.store(output, "Minesweeper Bot Configuration");
-            Logger.info("Конфигурация сохранена в " + configFile);
+            props.store(output, "Minesweeper Bot Configuration");
+            System.out.println("✅ Конфигурация сохранена в " + configFile);
         } catch (IOException e) {
-            Logger.error("Не удалось сохранить конфигурацию: " + e.getMessage());
+            System.err.println("❌ Ошибка сохранения конфигурации: " + e.getMessage());
         }
     }
 
-    /**
-     * Установить значения по умолчанию
-     */
     private void setDefaults() {
-        properties.setProperty("offsetX", "100");
-        properties.setProperty("offsetY", "100");
-        properties.setProperty("cellSize", "30");
-        properties.setProperty("delay", "200");
-        properties.setProperty("rows", "9");
-        properties.setProperty("cols", "9");
-        properties.setProperty("mines", "10");
-        properties.setProperty("strategy", "advanced");
+        props.setProperty("offsetX", "0");
+        props.setProperty("offsetY", "0");
+        props.setProperty("cellSize", "30");
+        props.setProperty("rows", "9");
+        props.setProperty("cols", "9");
+        props.setProperty("mines", "10");
+        props.setProperty("delay", "2000");
+        props.setProperty("debug", "true");
+    }
+
+    public int getInt(String key) {
+        return Integer.parseInt(props.getProperty(key, "0"));
     }
 
     public int getInt(String key, int defaultValue) {
-        String value = properties.getProperty(key);
-        if (value == null) return defaultValue;
         try {
-            return Integer.parseInt(value);
+            return Integer.parseInt(props.getProperty(key, String.valueOf(defaultValue)));
         } catch (NumberFormatException e) {
             return defaultValue;
         }
     }
 
-    public String getString(String key, String defaultValue) {
-        return properties.getProperty(key, defaultValue);
+    public String getString(String key) {
+        return props.getProperty(key, "");
     }
 
     public void setInt(String key, int value) {
-        properties.setProperty(key, String.valueOf(value));
+        props.setProperty(key, String.valueOf(value));
     }
 
     public void setString(String key, String value) {
-        properties.setProperty(key, value);
+        props.setProperty(key, value);
+    }
+
+    public void printConfig() {
+        System.out.println("\n📋 ТЕКУЩАЯ КОНФИГУРАЦИЯ:");
+        System.out.println("   offsetX = " + getInt("offsetX"));
+        System.out.println("   offsetY = " + getInt("offsetY"));
+        System.out.println("   cellSize = " + getInt("cellSize"));
+        System.out.println("   rows = " + getInt("rows"));
+        System.out.println("   cols = " + getInt("cols"));
+        System.out.println("   mines = " + getInt("mines"));
+        System.out.println("   delay = " + getInt("delay"));
+        System.out.println("   debug = " + getString("debug"));
     }
 }

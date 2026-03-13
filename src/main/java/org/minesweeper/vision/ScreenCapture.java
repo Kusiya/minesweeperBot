@@ -1,188 +1,89 @@
 package org.minesweeper.vision;
 
+import org.minesweeper.utils.Config;
+
 import java.awt.*;
 import java.awt.image.BufferedImage;
 
-/**
- * Захватывает изображение игрового поля с экрана
- */
 public class ScreenCapture {
-    private final Robot robot;
-    private Rectangle gameArea;      // область игрового поля
-    private int cellSize;             // размер клетки в пикселях
-    private int offsetX;              // отступ слева
-    private int offsetY;              // отступ сверху
-    private int rows;                 // количество строк (для обновления gameArea)
-    private int cols;                 // количество столбцов (для обновления gameArea)
+    private Robot robot;
+    private Rectangle gameArea;
+    private int cellSize;
+    private int offsetX;
+    private int offsetY;
+    private int rows;
+    private int cols;
+    private Config config;
 
     public ScreenCapture() throws AWTException {
         this.robot = new Robot();
+        this.config = Config.getInstance();
 
-        // Значения по умолчанию (нужно будет откалибровать под вашу игру)
-        this.cellSize = 30;
-        this.offsetX = 100;
-        this.offsetY = 100;
-        this.rows = 9;
-        this.cols = 9;
+        // Загружаем значения из конфига
+        this.offsetX = config.getInt("offsetX", 0);
+        this.offsetY = config.getInt("offsetY", 0);
+        this.cellSize = config.getInt("cellSize", 30);
+        this.rows = config.getInt("rows", 9);
+        this.cols = config.getInt("cols", 9);
+
         updateGameArea();
+
+        System.out.println("🖥️ ScreenCapture инициализирован");
+        System.out.println("   offset: (" + offsetX + "," + offsetY + ")");
+        System.out.println("   cellSize: " + cellSize);
+        System.out.println("   поле: " + rows + "x" + cols);
     }
 
-    /**
-     * Обновить область захвата на основе текущих параметров
-     */
     private void updateGameArea() {
-        this.gameArea = new Rectangle(offsetX, offsetY, cols * cellSize, rows * cellSize);
+        int width = cols * cellSize;
+        int height = rows * cellSize;
+        this.gameArea = new Rectangle(offsetX, offsetY, width, height);
+
+        System.out.println("📐 Область захвата: (" + offsetX + "," + offsetY +
+                ") размер " + width + "x" + height);
     }
 
-    /**
-     * Захватить весь экран
-     */
-    public BufferedImage captureFullScreen() {
-        Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
-        Rectangle screenRect = new Rectangle(screenSize);
-        return robot.createScreenCapture(screenRect);
-    }
-
-    /**
-     * Захватить только область игры
-     */
     public BufferedImage captureGameArea() {
-        return robot.createScreenCapture(gameArea);
+        BufferedImage screenshot = robot.createScreenCapture(gameArea);
+        System.out.println("📸 Скриншот сделан: " + screenshot.getWidth() + "x" + screenshot.getHeight());
+        return screenshot;
     }
 
-    /**
-     * Получить изображение конкретной клетки
-     */
     public BufferedImage getCellImage(BufferedImage fullImage, int row, int col) {
-        int x = offsetX + col * cellSize;
-        int y = offsetY + row * cellSize;
-        return fullImage.getSubimage(x, y, cellSize, cellSize);
-    }
+        int x = col * cellSize;
+        int y = row * cellSize;
 
-    /**
-     * Калибровка: определить размер клетки и координаты
-     */
-    public void calibrate(int expectedRows, int expectedCols) {
-        this.rows = expectedRows;
-        this.cols = expectedCols;
-        updateGameArea();
-        System.out.println("Калибровка завершена. Размер поля: " + rows + "x" + cols);
-    }
-
-    // ============ ГЕТТЕРЫ (нужны для MinesweeperBot) ============
-
-    /**
-     * Получить отступ по X
-     */
-    public int getOffsetX() {
-        return offsetX;
-    }
-
-    /**
-     * Получить отступ по Y
-     */
-    public int getOffsetY() {
-        return offsetY;
-    }
-
-    /**
-     * Получить размер клетки
-     */
-    public int getCellSize() {
-        return cellSize;
-    }
-
-    /**
-     * Получить количество строк
-     */
-    public int getRows() {
-        return rows;
-    }
-
-    /**
-     * Получить количество столбцов
-     */
-    public int getCols() {
-        return cols;
-    }
-
-    /**
-     * Получить область захвата
-     */
-    public Rectangle getGameArea() {
-        return gameArea;
-    }
-
-    // ============ СЕТТЕРЫ ============
-
-    /**
-     * Установить область игры
-     */
-    public void setGameArea(Rectangle area) {
-        this.gameArea = area;
-        // Обновляем offset и размеры из области
-        this.offsetX = area.x;
-        this.offsetY = area.y;
-        if (cols > 0) {
-            this.cellSize = area.width / cols;
+        if (x + cellSize <= fullImage.getWidth() && y + cellSize <= fullImage.getHeight()) {
+            return fullImage.getSubimage(x, y, cellSize, cellSize);
+        } else {
+            System.err.println("❌ Клетка [" + row + "," + col + "] вне границ: x=" + x + ", y=" + y);
+            return null;
         }
     }
 
-    /**
-     * Установить размер клетки
-     */
-    public void setCellSize(int size) {
-        this.cellSize = size;
-        updateGameArea();
-    }
-
-    /**
-     * Установить отступ по X
-     */
-    public void setOffsetX(int x) {
-        this.offsetX = x;
-        updateGameArea();
-    }
-
-    /**
-     * Установить отступ по Y
-     */
-    public void setOffsetY(int y) {
-        this.offsetY = y;
-        updateGameArea();
-    }
-
-    /**
-     * Установить количество строк
-     */
-    public void setRows(int rows) {
-        this.rows = rows;
-        updateGameArea();
-    }
-
-    /**
-     * Установить количество столбцов
-     */
-    public void setCols(int cols) {
-        this.cols = cols;
-        updateGameArea();
-    }
-
-    /**
-     * Полная калибровка с указанием всех параметров
-     */
+    // Обновленный метод калибровки
     public void setCalibration(int offsetX, int offsetY, int cellSize, int rows, int cols) {
         this.offsetX = offsetX;
         this.offsetY = offsetY;
         this.cellSize = cellSize;
         this.rows = rows;
         this.cols = cols;
+
+        // Сохраняем в конфиг
+        config.setInt("offsetX", offsetX);
+        config.setInt("offsetY", offsetY);
+        config.setInt("cellSize", cellSize);
+        config.setInt("rows", rows);
+        config.setInt("cols", cols);
+        config.save();
+
         updateGameArea();
     }
 
-    @Override
-    public String toString() {
-        return String.format("ScreenCapture{offset=(%d,%d), cellSize=%d, field=%dx%d, area=%s}",
-                offsetX, offsetY, cellSize, rows, cols, gameArea);
-    }
+    // Геттеры
+    public int getOffsetX() { return offsetX; }
+    public int getOffsetY() { return offsetY; }
+    public int getCellSize() { return cellSize; }
+    public int getRows() { return rows; }
+    public int getCols() { return cols; }
 }

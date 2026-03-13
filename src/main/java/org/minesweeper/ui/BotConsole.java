@@ -7,7 +7,13 @@ import org.minesweeper.strategy.BasicStrategy;
 import org.minesweeper.strategy.AdvancedStrategy;
 
 import java.awt.*;
+import java.awt.event.InputEvent;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Scanner;
+import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
@@ -160,7 +166,7 @@ public class BotConsole {
         System.out.println("5. ⚡ Изменить скорость");
         System.out.println("6. 🎯 Выбрать стратегию");
         System.out.println("7. 📐 Калибровка");
-        System.out.println("8. 🚨 ЭКСТРЕННАЯ ОСТАНОВКА (ESC)");
+        System.out.println("8. 🧪 Тест мыши"); // НОВЫЙ ПУНКТ
         System.out.println("9. ❌ Выход");
         System.out.print("👉 Выберите действие (1-9): ");
     }
@@ -209,13 +215,137 @@ public class BotConsole {
                 calibrate();
                 break;
             case "8":
-                emergencyStop();
+            case "test":
+            case "🧪":
+                testMouse();
                 break;
             case "9":
+            case "exit":
+            case "❌":
                 exit();
                 break;
+            case "0":
+                case "learn":
+                learningMode();
+                break;
             default:
-                System.out.println("❌ Неверный выбор");
+                System.out.println("❌ Неизвестная команда. Введите 1-9");
+        }
+    }
+
+    private void learningMode() {
+        System.out.println("\n🎓 РЕЖИМ ОБУЧЕНИЯ");
+        System.out.println("==================");
+
+        try {
+            Robot robot = new Robot();
+
+            for (int digit = 1; digit <= 8; digit++) {
+                System.out.println("\n📸 Наведите мышь на клетку с цифрой " + digit);
+                System.out.println("и нажмите Enter (или 'q' для выхода)...");
+
+                String input = scanner.nextLine();
+                if (input.equalsIgnoreCase("q")) break;
+
+                // Получаем координаты мыши
+                Point p = MouseInfo.getPointerInfo().getLocation();
+                System.out.println("   Координаты: (" + p.x + ", " + p.y + ")");
+
+                // Захватываем клетку (предполагаем размер 30x30)
+                Rectangle cellRect = new Rectangle(p.x - 15, p.y - 15, 30, 30);
+                BufferedImage cell = robot.createScreenCapture(cellRect);
+
+                // Анализируем
+                int brightness = getSimpleBrightness(cell);
+                double variance = getSimpleVariance(cell);
+
+                System.out.printf("   Яркость: %d, Вариативность: %.2f%n", brightness, variance);
+
+                // Сохраняем
+                String filename = String.format("templates/%d_%d.png",
+                        digit, System.currentTimeMillis());
+
+                File file = new File(filename);
+                file.getParentFile().mkdirs();
+                ImageIO.write(cell, "png", file);
+
+                System.out.println("   ✅ Сохранено: " + filename);
+            }
+
+            System.out.println("\n🎓 Обучение завершено! Перезапустите бота.");
+
+        } catch (Exception e) {
+            System.out.println("❌ Ошибка: " + e.getMessage());
+        }
+    }
+
+    private int getSimpleBrightness(BufferedImage img) {
+        long sum = 0;
+        for (int x = 0; x < img.getWidth(); x+=3) {
+            for (int y = 0; y < img.getHeight(); y+=3) {
+                int rgb = img.getRGB(x, y);
+                int r = (rgb >> 16) & 0xFF;
+                int g = (rgb >> 8) & 0xFF;
+                int b = rgb & 0xFF;
+                sum += (r + g + b) / 3;
+            }
+        }
+        return (int)(sum / ((img.getWidth() * img.getHeight()) / 9));
+    }
+
+    private double getSimpleVariance(BufferedImage img) {
+        List<Double> values = new ArrayList<>();
+        for (int x = 0; x < img.getWidth(); x+=3) {
+            for (int y = 0; y < img.getHeight(); y+=3) {
+                int rgb = img.getRGB(x, y);
+                int r = (rgb >> 16) & 0xFF;
+                int g = (rgb >> 8) & 0xFF;
+                int b = rgb & 0xFF;
+                values.add((r + g + b) / 3.0);
+            }
+        }
+
+        double mean = values.stream().mapToDouble(d -> d).average().orElse(0);
+        double variance = values.stream().mapToDouble(d -> Math.pow(d - mean, 2)).average().orElse(0);
+        return Math.sqrt(variance);
+    }
+
+    private void testMouse() {
+        System.out.println("\n🧪 ТЕСТ МЫШИ");
+        System.out.println("Бот проверит работу мыши за 5 секунд...");
+        System.out.println("Наблюдайте за курсором!");
+
+        try {
+            // Получаем MouseController через рефлексию или добавляем метод в MinesweeperBot
+            // Пока просто вызовем тестовый метод
+            // Временно добавим прямой тест
+            Robot robot = new Robot();
+
+            // Тест перемещения
+            System.out.println("1. Перемещение на (500, 500)");
+            robot.mouseMove(500, 500);
+            Thread.sleep(1000);
+
+            System.out.println("2. Левый клик");
+            robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
+            Thread.sleep(100);
+            robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
+            Thread.sleep(1000);
+
+            System.out.println("3. Правый клик");
+            robot.mousePress(InputEvent.BUTTON3_DOWN_MASK);
+            Thread.sleep(100);
+            robot.mouseRelease(InputEvent.BUTTON3_DOWN_MASK);
+            Thread.sleep(1000);
+
+            System.out.println("4. Возврат на (100, 100)");
+            robot.mouseMove(100, 100);
+
+            System.out.println("✅ Тест завершен");
+
+        } catch (Exception e) {
+            System.out.println("❌ Ошибка теста: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
@@ -318,20 +448,47 @@ public class BotConsole {
         System.out.println("1. Наведите мышь на ЛЕВЫЙ ВЕРХНИЙ угол поля и нажмите Enter");
         scanner.nextLine();
 
-        Point p1 = MouseController.getMousePosition();
-        System.out.println("   Координаты: (" + p1.x + ", " + p1.y + ")");
+        Point topLeft = MouseController.getMousePosition();
+        System.out.println("   Координаты: (" + topLeft.x + ", " + topLeft.y + ")");
 
-        System.out.println("2. Наведите мышь на ПРАВЫЙ НИЖНИЙ угол поля и нажмите Enter");
+        System.out.println("\n4. Наведите мышь на ПРАВЫЙ НИЖНИЙ УГОЛ последней клетки");
+        System.out.println("5. Нажмите Enter...");
         scanner.nextLine();
 
-        Point p2 = MouseController.getMousePosition();
-        System.out.println("   Координаты: (" + p2.x + ", " + p2.y + ")");
+        Point bottomRight = MouseController.getMousePosition();
+        System.out.println("   Координаты: (" + bottomRight.x + ", " + bottomRight.y + ")");
 
-        int cellSize = (p2.x - p1.x) / 9; // предполагаем 9x9 поле
-        System.out.println("3. Размер клетки: " + cellSize + " пикселей");
+        // Рассчитываем размер поля
+        int totalWidth = bottomRight.x - topLeft.x;
+        int totalHeight = bottomRight.y - topLeft.y;
 
-        bot.calibrate(p1.x, p1.y, cellSize);
+        System.out.println("   Общая ширина: " + totalWidth + " пикселей");
+        System.out.println("   Общая высота: " + totalHeight + " пикселей");
+
+        // Спрашиваем размер поля
+        System.out.print("\nВведите количество строк [9]: ");
+        String rowsStr = scanner.nextLine();
+        int rows = rowsStr.isEmpty() ? 9 : Integer.parseInt(rowsStr);
+
+        System.out.print("Введите количество столбцов [9]: ");
+        String colsStr = scanner.nextLine();
+        int cols = colsStr.isEmpty() ? 9 : Integer.parseInt(colsStr);
+
+        // Определяем размер клетки
+        int cellSizeByWidth = totalWidth / cols;
+        int cellSizeByHeight = totalHeight / rows;
+        int cellSize = (cellSizeByWidth + cellSizeByHeight) / 2;
+
+        System.out.println("   Размер клетки (по ширине): " + cellSizeByWidth);
+        System.out.println("   Размер клетки (по высоте): " + cellSizeByHeight);
+        System.out.println("   Используем средний: " + cellSize + " пикселей");
+
+        // Устанавливаем калибровку
+        bot.calibrate(topLeft.x, topLeft.y, cellSize, rows, cols);
+
         System.out.println("✅ Калибровка завершена!");
+        System.out.println("   offset=(" + topLeft.x + "," + topLeft.y + "), cellSize=" + cellSize);
+        System.out.println("   поле=" + rows + "x" + cols);
     }
 
     private void exit() {

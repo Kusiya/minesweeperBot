@@ -1,93 +1,102 @@
 package org.minesweeper.execution;
 
 import org.minesweeper.core.Move;
+import org.minesweeper.utils.Logger;
+
 import java.awt.*;
 import java.awt.event.InputEvent;
 
-/**
- * Управляет мышью для выполнения кликов
- */
 public class MouseController {
-    private final Robot robot;
-    private int offsetX;      // координата левого верхнего угла первой клетки
+    private Robot robot;
+    private int offsetX;
     private int offsetY;
-    private int cellSize;     // размер клетки в пикселях
+    private int cellSize;
+    private boolean debugMode = true;
 
     public MouseController() throws AWTException {
         this.robot = new Robot();
-        this.offsetX = 100;
-        this.offsetY = 100;
-        this.cellSize = 30;
+        this.offsetX = 902;  // из вашей калибровки
+        this.offsetY = 307;  // из вашей калибровки
+        this.cellSize = 23;  // из вашей калибровки
+
+        Logger.info("🖱️ MouseController инициализирован");
     }
 
-    /**
-     * Выполнить ход
-     */
     public void executeMove(Move move) {
-        int screenX = offsetX + move.getCol() * cellSize + cellSize / 2;
-        int screenY = offsetY + move.getRow() * cellSize + cellSize / 2;
+        if (move == null) return;
 
-        moveMouse(screenX, screenY);
+        try {
+            int screenX = offsetX + move.getCol() * cellSize + cellSize / 2;
+            int screenY = offsetY + move.getRow() * cellSize + cellSize / 2;
 
-        if (move.isFlag()) {
-            rightClick();
-        } else {
-            leftClick();
+            Logger.info("🎯 Цель: клетка [" + move.getRow() + "," + move.getCol() + "] -> (" + screenX + ", " + screenY + ")");
+            Logger.info("   Тип хода: " + (move.isFlag() ? "ФЛАГ" : "ОТКРЫТЬ"));
+
+            // Перемещаем мышь
+            moveMouse(screenX, screenY);
+            robot.delay(200);
+
+            // Выполняем клик в зависимости от типа хода
+            if (move.isFlag()) {
+                Logger.info("   🚩 Выполняю ПРАВЫЙ клик (флаг)");
+                rightClick();
+            } else {
+                Logger.info("   🔴 Выполняю ЛЕВЫЙ клик (открыть)");
+                leftClick();
+            }
+
+            robot.delay(200);
+
+        } catch (Exception e) {
+            Logger.error("Ошибка при выполнении хода: " + e.getMessage());
         }
-
-        // Небольшая задержка после клика
-        robot.delay(50);
     }
 
-    /**
-     * Переместить курсор
-     */
     private void moveMouse(int x, int y) {
-        robot.mouseMove(x, y);
-        robot.delay(20);
+        try {
+            robot.mouseMove(x, y);
+            robot.delay(100);
+        } catch (Exception e) {
+            Logger.error("Ошибка перемещения мыши: " + e.getMessage());
+        }
     }
 
-    /**
-     * Левый клик (открыть клетку)
-     */
     private void leftClick() {
-        robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
-        robot.delay(10);
-        robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
+        try {
+            robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
+            robot.delay(50);
+            robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
+            robot.delay(50);
+            Logger.debug("   Левый клик выполнен");
+        } catch (Exception e) {
+            Logger.error("Ошибка левого клика: " + e.getMessage());
+        }
     }
 
-    /**
-     * Правый клик (поставить флаг)
-     */
     private void rightClick() {
-        robot.mousePress(InputEvent.BUTTON3_DOWN_MASK);
-        robot.delay(10);
-        robot.mouseRelease(InputEvent.BUTTON3_DOWN_MASK);
+        try {
+            robot.mousePress(InputEvent.BUTTON3_DOWN_MASK);
+            robot.delay(50);
+            robot.mouseRelease(InputEvent.BUTTON3_DOWN_MASK);
+            robot.delay(50);
+            Logger.debug("   Правый клик выполнен");
+        } catch (Exception e) {
+            Logger.error("Ошибка правого клика: " + e.getMessage());
+        }
     }
 
-    /**
-     * Двойной клик (для открытия области)
-     */
-    public void doubleClick() {
-        leftClick();
-        robot.delay(50);
-        leftClick();
+    public static Point getMousePosition() {
+        return MouseInfo.getPointerInfo().getLocation();
     }
 
-    // Методы для калибровки
     public void setOffset(int x, int y) {
         this.offsetX = x;
         this.offsetY = y;
+        Logger.info("MouseController offset: (" + x + ", " + y + ")");
     }
 
     public void setCellSize(int size) {
         this.cellSize = size;
-    }
-
-    /**
-     * Получить текущие координаты мыши (для калибровки)
-     */
-    public static Point getMousePosition() {
-        return MouseInfo.getPointerInfo().getLocation();
+        Logger.info("MouseController cellSize: " + size);
     }
 }

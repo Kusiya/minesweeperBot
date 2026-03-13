@@ -5,6 +5,9 @@ import org.minesweeper.utils.Logger;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.minesweeper.vision.TemplateCellRecognizer.FLAG;
+import static org.minesweeper.vision.TemplateCellRecognizer.MINE;
+
 /**
  * Хранит текущее состояние игрового поля
  */
@@ -41,33 +44,37 @@ public class GameState {
      *                   -1 - мина, 0-8 - цифры, -2 - закрыто, -3 - флаг
      */
     public void updateFromVision(int[][] visionData) {
+        // Сбрасываем флаги
+        boolean mineFound = false;
+
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
                 int value = visionData[i][j];
                 Cell cell = board[i][j];
 
-                if (value >= 0 && value <= 8) {
-                    // Открытая клетка с цифрой
-                    cell.setRevealed(true);
-                    cell.setFlagged(false);
-                    cell.setAdjacentMines(value);
-                    cell.setMine(false);
-                    revealedCount++;
-                } else if (value == -1) {
-                    // Открытая мина - игра проиграна
+                if (value == MINE) {
+                    // Мина обнаружена!
                     cell.setRevealed(true);
                     cell.setMine(true);
-                    cell.setFlagged(false);
-                    gameOver = true; // <-- ВАЖНО!
-                    Logger.debug("🔴 Обнаружена мина в клетке (" + i + "," + j + ")");
-                } else if (value == -3) {
-                    // Флаг
-                    cell.setFlagged(true);
-                    cell.setRevealed(false);
-                    flaggedCount++;
+                    mineFound = true;
+                    System.out.println("💥💥💥 МИНА ОБНАРУЖЕНА в клетке [" + i + "," + j + "]");
                 }
-                // -2 (закрыто) ничего не меняем
+                else if (value >= 0 && value <= 8) {
+                    cell.setRevealed(true);
+                    cell.setMine(false);
+                    cell.setAdjacentMines(value);
+                }
+                else if (value == FLAG) {
+                    cell.setFlagged(true);
+                }
+                // UNKNOWN ничего не меняем
             }
+        }
+
+        // Если найдена мина - игра проиграна
+        if (mineFound) {
+            gameOver = true;
+            System.out.println("💥💥💥 ИГРА ПРОИГРАНА! Обнаружена мина.");
         }
     }
 
@@ -98,6 +105,20 @@ public class GameState {
             if (cell.isFlagged()) count++;
         }
         return count;
+    }
+
+    /**
+     * Проверить, есть ли мины на поле
+     */
+    public boolean hasMines() {
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                if (board[i][j].isMine()) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

@@ -3,6 +3,7 @@ package org.minesweeper.strategy;
 import org.minesweeper.core.Cell;
 import org.minesweeper.core.GameState;
 import org.minesweeper.core.Move;
+import org.minesweeper.utils.Logger;
 
 /**
  * Базовая стратегия, использующая простые правила
@@ -16,9 +17,13 @@ public class BasicStrategy implements Strategy {
 
     @Override
     public Move nextMove(GameState state) {
-        // Ищем безопасные клетки для открытия
         Move safeMove = findSafeCellToOpen(state);
         if (safeMove != null) {
+            // Дополнительная проверка
+            if (state.getCell(safeMove.getRow(), safeMove.getCol()).isRevealed()) {
+                Logger.warn("⚠️ BasicStrategy нашла уже открытую клетку! Пропускаем.");
+                return null;
+            }
             return safeMove;
         }
 
@@ -27,6 +32,7 @@ public class BasicStrategy implements Strategy {
         if (flagMove != null) {
             return flagMove;
         }
+
         return null; // нет очевидных ходов
     }
 

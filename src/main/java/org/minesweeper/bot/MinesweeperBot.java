@@ -5,7 +5,6 @@ import org.minesweeper.core.Move;
 import org.minesweeper.strategy.Strategy;
 import org.minesweeper.strategy.BasicStrategy;
 import org.minesweeper.vision.ScreenCapture;
-import org.minesweeper.vision.CellRecognizer;
 import org.minesweeper.execution.MouseController;
 import org.minesweeper.utils.Logger;
 import org.minesweeper.vision.TemplateCellRecognizer;
@@ -13,6 +12,7 @@ import org.minesweeper.vision.TemplateLoader;
 
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -32,7 +32,7 @@ public class MinesweeperBot {
 
     // Компоненты
     private final ScreenCapture screenCapture;
-    private final CellRecognizer cellRecognizer;
+    private final TemplateCellRecognizer cellRecognizer;
     private Strategy strategy;
     private final MouseController mouseController;
 
@@ -122,7 +122,7 @@ public class MinesweeperBot {
         int consecutiveFailures = 0;
         int movesWithoutChange = 0;
         String lastBoardHash = "";
-        boolean gameFinished = false; // <-- ДОБАВИТЬ
+        boolean gameFinished = false;
 
         try {
             while (running.get() && !Thread.currentThread().isInterrupted() && !gameFinished) {
@@ -155,12 +155,6 @@ public class MinesweeperBot {
                 int[][] visionData = recognizeBoard(screenshot);
                 if (visionData == null) {
                     consecutiveFailures++;
-                    Logger.error("Не удалось распознать поле");
-
-                    if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-                        Logger.error("Слишком много ошибок распознавания. Завершаем игру.");
-                        break;
-                    }
                     continue;
                 }
 
@@ -177,16 +171,16 @@ public class MinesweeperBot {
                     Logger.info("💥 ИГРА ПРОИГРАНА! Наступили на мину.");
                     gamesLost++;
                     showFinalBoard(state);
-                    gameFinished = true; // <-- УСТАНОВИТЬ ФЛАГ
-                    break; // <-- ВЫЙТИ ИЗ ЦИКЛА
+                    running.set(false);
+                    break;
                 }
 
                 if (state.checkWinCondition()) {
                     Logger.info("🎉 ПОБЕДА! Все мины найдены.");
                     gamesWon++;
                     showFinalBoard(state);
-                    gameFinished = true; // <-- УСТАНОВИТЬ ФЛАГ
-                    break; // <-- ВЫЙТИ ИЗ ЦИКЛА
+                    running.set(false);
+                    break;
                 }
 
                 // 5. Проверка прогресса
@@ -212,13 +206,46 @@ public class MinesweeperBot {
                     lastBoardHash = currentHash;
                 }
 
-                // 6. Выбор хода
+                // 6. Выбор хода (закрытые клетки)
                 Move move = strategy.nextMove(state);
 
                 if (move == null) {
-                    Logger.warn("Стратегия не нашла ход. Делаем случайный.");
-                    makeRandomMove(state);
-                } else {
+                    Logger.warn("Нет безопасных ходов. Пробуем случайный...");
+                    move = getRandomMove(state);
+                }
+
+                if (move != null) {
+                    // ЖЕСТКАЯ ПРОВЕРКА - НИКАКИХ ОТКРЫТЫХ КЛЕТОК!
+                    org.minesweeper.core.Cell targetCell = state.getCell(move.getRow(), move.getCol());
+
+                    if (targetCell.isRevealed()) {
+                        Logger.error("❌❌❌ КРИТИЧЕСКАЯ ОШИБКА: Стратегия вернула УЖЕ ОТКРЫТУЮ клетку!");
+                        Logger.error("   Клетка [" + move.getRow() + "," + move.getCol() + "] уже открыта со значением " + targetCell.getAdjacentMines());
+
+                        // Находим любую НЕОТКРЫТУЮ клетку
+                        java.util.List<org.minesweeper.core.Cell> unknown = new ArrayList<>();
+                        for (int i = 0; i < rows; i++) {
+                            for (int j = 0; j < cols; j++) {
+                                org.minesweeper.core.Cell cell = state.getCell(i, j);
+                                if (!cell.isRevealed() && !cell.isFlagged()) {
+                                    unknown.add(cell);
+                                }
+                            }
+                        }
+
+                        if (!unknown.isEmpty()) {
+                            java.util.Random rand = new java.util.Random();
+                            org.minesweeper.core.Cell newCell = unknown.get(rand.nextInt(unknown.size()));
+                            move = new Move(newCell.getRow(), newCell.getCol(), false, 0.9,
+                                    "Аварийный выбор после ошибки");
+                            Logger.info("✅ Выбрана аварийная клетка: [" + newCell.getRow() + "," + newCell.getCol() + "]");
+                        } else {
+                            Logger.error("❌ Нет неизвестных клеток! Игра зависла.");
+                            running.set(false);
+                            break;
+                        }
+                    }
+
                     Logger.info("🎯 Ход: " + move);
                     mouseController.executeMove(move);
                 }
@@ -238,6 +265,8 @@ public class MinesweeperBot {
         } finally {
             running.set(false);
             printStatistics();
+            Logger.info("🏁 Игра завершена. Возврат в меню...");
+
             // Небольшая пауза перед возвратом в меню
             try {
                 Thread.sleep(2000);
@@ -245,6 +274,87 @@ public class MinesweeperBot {
                 Thread.currentThread().interrupt();
             }
         }
+    }
+
+    /**
+     * Проверка, что ход ведет на НЕОТКРЫТУЮ клетку
+     */
+    private boolean isValidMove(GameState state, Move move) {
+        if (move == null) return false;
+
+        int row = move.getRow();
+        int col = move.getCol();
+
+        // Проверяем границы
+        if (row < 0 || row >= rows || col < 0 || col >= cols) {
+            Logger.warn("Ход за пределами поля: (" + row + "," + col + ")");
+            return false;
+        }
+
+        org.minesweeper.core.Cell cell = state.getCell(row, col);
+
+        // КЛЮЧЕВОЕ: не открываем уже открытые клетки
+        if (cell.isRevealed() && !move.isFlag()) {
+            Logger.debug("Пропускаем уже открытую клетку: (" + row + "," + col + ")");
+            return false;
+        }
+
+        // Не ставим флаг на открытую клетку
+        if (cell.isRevealed() && move.isFlag()) {
+            Logger.debug("Нельзя поставить флаг на открытую клетку");
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Умный выбор хода - только новые клетки
+     */
+    private Move getIntelligentMove(GameState state) {
+        Move move = strategy.nextMove(state);
+
+        // Если стратегия вернула уже открытую клетку - ищем другой ход
+        if (move != null && !isValidMove(state, move)) {
+            Logger.debug("Стратегия вернула уже открытую клетку, ищем другой ход...");
+
+            // Пробуем найти другой ход через базовую стратегию
+            BasicStrategy basic = new BasicStrategy();
+            move = basic.nextMove(state);
+
+            // Если все равно открытая - ищем случайный среди НОВЫХ
+            if (move != null && !isValidMove(state, move)) {
+                move = getRandomMove(state);
+            }
+        }
+
+        return move;
+    }
+
+    /**
+     * Случайный ход ТОЛЬКО по НОВЫМ клеткам
+     */
+    private Move getRandomMove(GameState state) {
+        java.util.List<org.minesweeper.core.Cell> unknown = state.getUnknownCells();
+
+        // Фильтруем только НЕОТКРЫТЫЕ клетки
+        java.util.List<org.minesweeper.core.Cell> available = new ArrayList<>();
+        for (org.minesweeper.core.Cell cell : unknown) {
+            if (!cell.isRevealed() && !cell.isFlagged()) {
+                available.add(cell);
+            }
+        }
+
+        if (available.isEmpty()) {
+            Logger.warn("Нет неизвестных клеток!");
+            return null;
+        }
+
+        java.util.Random rand = new java.util.Random();
+        org.minesweeper.core.Cell cell = available.get(rand.nextInt(available.size()));
+
+        return new Move(cell.getRow(), cell.getCol(), false, 0.7,
+                "Случайный ход по новой клетке");
     }
 
     /**
@@ -370,13 +480,18 @@ public class MinesweeperBot {
         this.totalMines = mines;
     }
 
-    public void calibrate(int offsetX, int offsetY, int cellSize) {
-        screenCapture.setOffsetX(offsetX);
-        screenCapture.setOffsetY(offsetY);
-        screenCapture.setCellSize(cellSize);
+    public void calibrate(int offsetX, int offsetY, int cellSize, int rows, int cols) {
+        screenCapture.setCalibration(offsetX, offsetY, cellSize, rows, cols);
         mouseController.setOffset(offsetX, offsetY);
         mouseController.setCellSize(cellSize);
-        Logger.info("📐 Калибровка: offset=(" + offsetX + "," + offsetY + "), cellSize=" + cellSize);
+
+        // Обновляем параметры игры
+        this.rows = rows;
+        this.cols = cols;
+        // totalMines оставляем как есть или можно тоже спросить
+
+        Logger.info("📐 Калибровка: offset=(" + offsetX + "," + offsetY +
+                "), cellSize=" + cellSize + ", поле=" + rows + "x" + cols);
     }
 
     public boolean isGameFinished() {
@@ -386,21 +501,9 @@ public class MinesweeperBot {
     // Добавить флаг экстренной остановки
     private final AtomicBoolean emergencyStop = new AtomicBoolean(false);
 
-    // В метод gameLoop() добавить проверку клавиши ESC
-    private void checkEmergencyStop() {
-        try {
-            // Проверяем, нажата ли клавиша ESC
-            if (KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner() != null) {
-                // Можно проверить через Robot, но проще добавить слушатель
-            }
-        } catch (Exception e) {
-            // Игнорируем
-        }
-    }
-
     // Добавить метод экстренной остановки
     public void emergencyStop() {
-        Logger.warn("ЭКСТРЕННАЯ ОСТАНОВКА!");
+        Logger.warn("🚨 ЭКСТРЕННАЯ ОСТАНОВКА!");
         emergencyStop.set(true);
         running.set(false);
         paused.set(false);
